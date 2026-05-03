@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 const SELECTED_FOLDER_KEY = 'secure-drive-selected-folder';
@@ -239,7 +239,7 @@ export default function FolderContentsPage() {
     }
   };
 
-  const renderTreeNodes = (nodes: FolderTreeNode[], depth = 0): JSX.Element[] => {
+  const renderTreeNodes = (nodes: FolderTreeNode[], depth = 0): ReactElement[] => {
     return nodes.flatMap((node) => {
       const row = (
         <div

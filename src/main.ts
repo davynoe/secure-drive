@@ -1,4 +1,5 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
 
@@ -26,6 +27,68 @@ const createWindow = () => {
     );
   }
 };
+
+type FolderEntry = {
+  name: string;
+  path: string;
+  kind: 'file' | 'directory';
+  size: number | null;
+};
+
+ipcMain.handle('secure-drive:pick-folder', async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ['openDirectory'],
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+
+  return result.filePaths[0];
+});
+
+ipcMain.handle('secure-drive:list-folder', async (_event, folderPath: string): Promise<FolderEntry[]> => {
+  if (!folderPath || typeof folderPath !== 'string') {
+    return [];
+  }
+
+  const dirents = await fs.readdir(folderPath, { withFileTypes: true });
+  const entries = await Promise.all(
+    dirents.map(async (dirent): Promise<FolderEntry> => {
+      const fullPath = path.join(folderPath, dirent.name);
+      if (dirent.isDirectory()) {
+        return {
+          name: dirent.name,
+          path: fullPath,
+          kind: 'directory',
+          size: null,
+        };
+      }
+
+      let size: number | null = null;
+      try {
+        const stats = await fs.stat(fullPath);
+        size = stats.size;
+      } catch {
+        size = null;
+      }
+
+      return {
+        name: dirent.name,
+        path: fullPath,
+        kind: 'file',
+        size,
+      };
+    })
+  );
+
+  return entries.sort((a, b) => {
+    if (a.kind !== b.kind) {
+      return a.kind === 'directory' ? -1 : 1;
+    }
+    return a.name.localeCompare(b.name);
+  });
+});
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.

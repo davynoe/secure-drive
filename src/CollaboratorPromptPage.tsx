@@ -73,7 +73,7 @@ export default function CollaboratorPromptPage() {
       // Ignore localStorage write failures.
     }
 
-    navigate('/');
+    navigate('/files', { state: { folderPath } });
   };
 
   return (
