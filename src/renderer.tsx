@@ -1,13 +1,12 @@
-import './index.css';
-import React from 'react';
-import { createRoot } from 'react-dom/client';
+import './index.css'; // import css
 
-const App = () => {
-  return (
-    <div className="flex items-center justify-center h-screen bg-gray-100">
-      <h1 className="text-3xl font-bold text-blue-600">Hello!</h1>
-    </div>
-  );
-};
+import * as React from "react";
+import { createRoot } from "react-dom/client";
+import App from './App';
 
-createRoot(document.getElementById('root')!).render(<App />);
+const root = createRoot(document.getElementById('root') as HTMLElement);
+root.render(
+  React.createElement(React.StrictMode, null,
+    React.createElement(App, null)
+  )
+);
