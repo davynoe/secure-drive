@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-const USERNAME_KEY = 'secure-drive-username';
+const HANDLE_KEY = 'secure-drive-handle';
 const SELECTED_FOLDER_KEY = 'secure-drive-selected-folder';
 const CONNECTIONS_KEY = 'secure-drive-connections';
 
@@ -39,7 +39,7 @@ type HomepageProps = {
 
 export default function Homepage({ onLogout }: HomepageProps) {
   const navigate = useNavigate();
-  const [username, setUsername] = useState('');
+  const [handle, setHandle] = useState('');
   const [connections, setConnections] = useState<SavedConnection[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [friends, setFriends] = useState<Collaborator[]>([STATIC_COLLABORATORS[0], STATIC_COLLABORATORS[2]]);
@@ -103,9 +103,9 @@ export default function Homepage({ onLogout }: HomepageProps) {
 
   useEffect(() => {
     try {
-      setUsername(localStorage.getItem(USERNAME_KEY) ?? '');
+      setHandle(localStorage.getItem(HANDLE_KEY) ?? '');
     } catch {
-      setUsername('');
+      setHandle('');
     }
 
     loadConnections();
@@ -146,7 +146,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
               Secure Drive
             </p>
             <h1 className="mt-2 text-3xl font-bold md:text-4xl">Homepage</h1>
-            <p className="mt-2 text-sm text-slate-300">Welcome, {username || 'Guest'}</p>
+            <p className="mt-2 text-sm text-slate-300">Welcome, {handle || 'Guest'}</p>
           </div>
           <button
             type="button"

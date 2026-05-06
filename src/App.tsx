@@ -4,6 +4,7 @@ import CollaboratorPromptPage from './CollaboratorPromptPage';
 import FolderContentsPage from './FolderContentsPage';
 import Homepage from './Homepage';
 import LoginPage from './LoginPage';
+import SignUpPage from './SignUpPage';
 
 const AUTH_FLAG_KEY = 'secure-drive-authenticated';
 
@@ -58,7 +59,11 @@ export default function App() {
       <Routes>
         <Route
           path="/"
-          element={isLoggedIn ? <Homepage onLogout={handleLogout} /> : <Navigate to="/login" replace />}
+          element={isLoggedIn ? <Homepage onLogout={handleLogout} /> : <Navigate to="/signup" replace />}
+        />
+        <Route
+          path="/signup"
+          element={!isLoggedIn ? <SignUpPage onSignUp={handleLogin} /> : <Navigate to="/" replace />}
         />
         <Route
           path="/login"
@@ -66,10 +71,10 @@ export default function App() {
         />
         <Route
           path="/connect-folder"
-          element={isLoggedIn ? <CollaboratorPromptPage /> : <Navigate to="/login" replace />}
+          element={isLoggedIn ? <CollaboratorPromptPage /> : <Navigate to="/signup" replace />}
         />
-        <Route path="/files" element={isLoggedIn ? <FolderContentsPage /> : <Navigate to="/login" replace />} />
-        <Route path="*" element={<Navigate to={isLoggedIn ? '/' : '/login'} replace />} />
+        <Route path="/files" element={isLoggedIn ? <FolderContentsPage /> : <Navigate to="/signup" replace />} />
+        <Route path="*" element={<Navigate to={isLoggedIn ? '/' : '/signup'} replace />} />
       </Routes>
     </Router>
   );
