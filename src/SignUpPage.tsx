@@ -4,6 +4,8 @@ import { Link } from 'react-router-dom';
 const USERNAME_KEY = 'secure-drive-username';
 const EMAIL_KEY = 'secure-drive-email';
 const HANDLE_KEY = 'secure-drive-handle';
+// @ts-ignore - Vite will inject this at build time
+const API_URL = import.meta.env.VITE_API_URL as string;
 
 type SignUpPageProps = {
   onSignUp: () => void;
@@ -14,20 +16,63 @@ export default function SignUpPage({ onSignUp }: SignUpPageProps) {
   const [email, setEmail] = useState('');
   const [handle, setHandle] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!username.trim() || !email.trim() || !handle.trim() || !password.trim()) return;
 
-    try {
-      localStorage.setItem(USERNAME_KEY, username.trim());
-      localStorage.setItem(EMAIL_KEY, email.trim());
-      localStorage.setItem(HANDLE_KEY, handle.trim());
-    } catch {
-      // Ignore localStorage write failures.
-    }
+    setError('');
+    setLoading(true);
 
-    onSignUp();
+    try {
+      // Check if handle is available
+      const checkResponse = await fetch(`${API_URL}/checkhandle/${handle.trim()}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      const checkData = await checkResponse.json();
+
+      if (checkData.status !== 'OK') {
+        setError(checkData.message || 'Handle is not available.');
+        setLoading(false);
+        return;
+      }
+
+      // Handle is available, create user
+      const addResponse = await fetch(`${API_URL}/adduser`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: username.trim(),
+          handle: handle.trim(),
+          password: password.trim(),
+          email: email.trim(),
+        }),
+      });
+
+      const addData = await addResponse.json();
+
+      if (addData.status === 'success') {
+        try {
+          localStorage.setItem(USERNAME_KEY, username.trim());
+          localStorage.setItem(EMAIL_KEY, email.trim());
+          localStorage.setItem(HANDLE_KEY, handle.trim());
+        } catch {
+          // Ignore localStorage write failures.
+        }
+        onSignUp();
+      } else {
+        setError(addData.message || 'Failed to create account.');
+      }
+    } catch (err) {
+      setError('Failed to connect to server. Please try again.');
+      console.error('Sign up error:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -39,6 +84,12 @@ export default function SignUpPage({ onSignUp }: SignUpPageProps) {
           <p className="mt-2 text-sm text-slate-300">Choose a username, email, handle, and password to get started.</p>
 
           <form className="mt-7 space-y-4" onSubmit={handleSubmit}>
+            {error && (
+              <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                {error}
+              </div>
+            )}
+
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-200" htmlFor="username">
                 Username
@@ -51,6 +102,7 @@ export default function SignUpPage({ onSignUp }: SignUpPageProps) {
                 placeholder="Your name"
                 className="w-full rounded-xl border border-white/15 bg-slate-900/70 px-4 py-3 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-300 focus:ring-2 focus:ring-emerald-300/30"
                 required
+                disabled={loading}
               />
             </div>
 
@@ -66,6 +118,7 @@ export default function SignUpPage({ onSignUp }: SignUpPageProps) {
                 placeholder="you@example.com"
                 className="w-full rounded-xl border border-white/15 bg-slate-900/70 px-4 py-3 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-300 focus:ring-2 focus:ring-emerald-300/30"
                 required
+                disabled={loading}
               />
             </div>
 
@@ -81,6 +134,7 @@ export default function SignUpPage({ onSignUp }: SignUpPageProps) {
                 placeholder="your-handle"
                 className="w-full rounded-xl border border-white/15 bg-slate-900/70 px-4 py-3 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-300 focus:ring-2 focus:ring-emerald-300/30"
                 required
+                disabled={loading}
               />
             </div>
 
@@ -96,14 +150,16 @@ export default function SignUpPage({ onSignUp }: SignUpPageProps) {
                 placeholder="Create a password"
                 className="w-full rounded-xl border border-white/15 bg-slate-900/70 px-4 py-3 text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-300 focus:ring-2 focus:ring-emerald-300/30"
                 required
+                disabled={loading}
               />
             </div>
 
             <button
               type="submit"
-              className="mt-2 w-full rounded-xl bg-emerald-400 px-4 py-3 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-300"
+              disabled={loading}
+              className="mt-2 w-full rounded-xl bg-emerald-400 px-4 py-3 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-300 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Sign up
+              {loading ? 'Creating account...' : 'Sign up'}
             </button>
           </form>
 

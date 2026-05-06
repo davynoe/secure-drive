@@ -9,6 +9,7 @@ type FolderEntry = {
 
 interface Window {
 	secureDrive: {
+		apiBaseUrl: string;
 		pickFolder: () => Promise<string | null>;
 		listFolder: (folderPath: string) => Promise<FolderEntry[]>;
 	};
