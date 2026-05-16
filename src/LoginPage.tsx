@@ -1,12 +1,19 @@
 import { FormEvent, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-const HANDLE_KEY = 'secure-drive-handle';
+const USER_KEY = 'secure-drive-user';
 // @ts-ignore - Vite will inject this at build time
 const API_URL = import.meta.env.VITE_API_URL as string;
 
+type StoredUser = {
+  id: number;
+  name: string;
+  handle: string;
+  email: string;
+};
+
 type LoginPageProps = {
-  onLogin: () => void;
+  onLogin: (user: StoredUser) => void;
 };
 
 export default function LoginPage({ onLogin }: LoginPageProps) {
@@ -23,7 +30,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     setLoading(true);
 
     try {
-      const response = await fetch(`${API_URL}/checkpassword`, {
+      const response = await fetch(`${API_URL}/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ handle: handle.trim(), password: password.trim() }),
@@ -31,13 +38,21 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
 
       const data = await response.json();
 
-      if (data.status === 'OK') {
+      if (data.status === 'success' || data.status === 'ok') {
         try {
-          localStorage.setItem(HANDLE_KEY, handle.trim());
+          localStorage.setItem(
+            USER_KEY,
+            JSON.stringify({
+              id: data.id,
+              name: data.name,
+              handle: data.handle,
+              email: data.email,
+            } satisfies StoredUser),
+          );
         } catch {
           // Ignore localStorage write failures.
         }
-        onLogin();
+        onLogin({ id: data.id, name: data.name, handle: data.handle, email: data.email });
       } else {
         setError(data.message || 'Login failed.');
       }

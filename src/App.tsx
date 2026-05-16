@@ -6,22 +6,44 @@ import Homepage from './Homepage';
 import LoginPage from './LoginPage';
 import SignUpPage from './SignUpPage';
 
-const AUTH_FLAG_KEY = 'secure-drive-authenticated';
+const USER_KEY = 'secure-drive-user';
 
-function readAuthFlag(): boolean {
+type StoredUser = {
+  id: number;
+  name: string;
+  handle: string;
+  email: string;
+};
+
+function readStoredUser(): StoredUser | null {
   try {
-    return localStorage.getItem(AUTH_FLAG_KEY) === 'true';
+    const raw = localStorage.getItem(USER_KEY);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<StoredUser>;
+    if (
+      typeof parsed.id !== 'number' ||
+      typeof parsed.name !== 'string' ||
+      typeof parsed.handle !== 'string' ||
+      typeof parsed.email !== 'string'
+    ) {
+      return null;
+    }
+
+    return parsed as StoredUser;
   } catch {
-    return false;
+    return null;
   }
 }
 
-function writeAuthFlag(value: boolean): void {
+function writeStoredUser(user: StoredUser | null): void {
   try {
-    if (value) {
-      localStorage.setItem(AUTH_FLAG_KEY, 'true');
+    if (user) {
+      localStorage.setItem(USER_KEY, JSON.stringify(user));
     } else {
-      localStorage.removeItem(AUTH_FLAG_KEY);
+      localStorage.removeItem(USER_KEY);
     }
   } catch {
     // Ignore localStorage write failures.
@@ -29,14 +51,14 @@ function writeAuthFlag(value: boolean): void {
 }
 
 export default function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(readAuthFlag);
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => readStoredUser() !== null);
 
   useEffect(() => {
-    setIsLoggedIn(readAuthFlag());
+    setIsLoggedIn(readStoredUser() !== null);
 
     const onStorage = (event: StorageEvent) => {
-      if (event.key === AUTH_FLAG_KEY) {
-        setIsLoggedIn(readAuthFlag());
+      if (event.key === USER_KEY) {
+        setIsLoggedIn(readStoredUser() !== null);
       }
     };
 
@@ -44,13 +66,13 @@ export default function App() {
     return () => window.removeEventListener('storage', onStorage);
   }, []);
 
-  const handleLogin = () => {
-    writeAuthFlag(true);
+  const handleLogin = (user: StoredUser) => {
+    writeStoredUser(user);
     setIsLoggedIn(true);
   };
 
   const handleLogout = () => {
-    writeAuthFlag(false);
+    writeStoredUser(null);
     setIsLoggedIn(false);
   };
 

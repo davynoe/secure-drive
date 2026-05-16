@@ -1,14 +1,19 @@
 import { FormEvent, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-const USERNAME_KEY = 'secure-drive-username';
-const EMAIL_KEY = 'secure-drive-email';
-const HANDLE_KEY = 'secure-drive-handle';
+const USER_KEY = 'secure-drive-user';
 // @ts-ignore - Vite will inject this at build time
 const API_URL = import.meta.env.VITE_API_URL as string;
 
+type StoredUser = {
+  id: number;
+  name: string;
+  handle: string;
+  email: string;
+};
+
 type SignUpPageProps = {
-  onSignUp: () => void;
+  onSignUp: (user: StoredUser) => void;
 };
 
 export default function SignUpPage({ onSignUp }: SignUpPageProps) {
@@ -27,22 +32,7 @@ export default function SignUpPage({ onSignUp }: SignUpPageProps) {
     setLoading(true);
 
     try {
-      // Check if handle is available
-      const checkResponse = await fetch(`${API_URL}/checkhandle/${handle.trim()}`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      });
-
-      const checkData = await checkResponse.json();
-
-      if (checkData.status !== 'OK') {
-        setError(checkData.message || 'Handle is not available.');
-        setLoading(false);
-        return;
-      }
-
-      // Handle is available, create user
-      const addResponse = await fetch(`${API_URL}/adduser`, {
+      const response = await fetch(`${API_URL}/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -53,20 +43,27 @@ export default function SignUpPage({ onSignUp }: SignUpPageProps) {
         }),
       });
 
-      const addData = await addResponse.json();
+      const data = await response.json();
 
-      if (addData.status === 'success') {
+      if (data.status === 'success' || data.status === 'ok') {
         try {
-          localStorage.setItem(USERNAME_KEY, username.trim());
-          localStorage.setItem(EMAIL_KEY, email.trim());
-          localStorage.setItem(HANDLE_KEY, handle.trim());
+          localStorage.setItem(
+            USER_KEY,
+            JSON.stringify({
+              id: data.id,
+              name: data.name,
+              handle: data.handle,
+              email: data.email,
+            } satisfies StoredUser),
+          );
         } catch {
           // Ignore localStorage write failures.
         }
-        onSignUp();
-      } else {
-        setError(addData.message || 'Failed to create account.');
+        onSignUp({ id: data.id, name: data.name, handle: data.handle, email: data.email });
+        return;
       }
+
+      setError(data.message || 'Failed to create account.');
     } catch (err) {
       setError('Failed to connect to server. Please try again.');
       console.error('Sign up error:', err);
