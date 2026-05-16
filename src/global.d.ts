@@ -7,10 +7,56 @@ type FolderEntry = {
 	size: number | null;
 };
 
+type SyncConnection = {
+	id: number;
+	ownerUserId: number;
+	folderPath: string;
+	folderName: string;
+	collaborator: string | null;
+	createdAt: string;
+	updatedAt: string;
+};
+
+type SyncConnectionInput = {
+	ownerUserId: number;
+	folderPath: string;
+	folderName: string;
+	collaborator: string | null;
+};
+
+type FileMetadata = {
+	id: number;
+	connectionId: number;
+	filename: string;
+	relativePath: string;
+	size: number | null;
+	lastModified: number;
+	contentHash: string | null;
+	isDirectory: boolean;
+	deleted: boolean;
+	createdAt: string;
+	updatedAt: string;
+};
+
+type FileMetadataInput = {
+	filename: string;
+	relativePath: string;
+	size: number | null;
+	lastModified: number;
+	contentHash?: string | null;
+	isDirectory?: boolean;
+	deleted?: boolean;
+};
+
 interface Window {
 	secureDrive: {
 		apiBaseUrl: string;
 		pickFolder: () => Promise<string | null>;
 		listFolder: (folderPath: string) => Promise<FolderEntry[]>;
+		listSyncConnections: (ownerUserId: number) => Promise<SyncConnection[]>;
+		upsertSyncConnection: (input: SyncConnectionInput) => Promise<SyncConnection | null>;
+		listFileMetadata: (connectionId: number) => Promise<FileMetadata[]>;
+		upsertFileMetadata: (connectionId: number, input: FileMetadataInput) => Promise<FileMetadata | null>;
+		replaceFileMetadata: (connectionId: number, files: FileMetadataInput[]) => Promise<FileMetadata[]>;
 	};
 }

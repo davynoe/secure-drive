@@ -9,9 +9,60 @@ type FolderEntry = {
 	size: number | null;
 };
 
+type SyncConnection = {
+	id: number;
+	ownerUserId: number;
+	folderPath: string;
+	folderName: string;
+	collaborator: string | null;
+	createdAt: string;
+	updatedAt: string;
+};
+
+type SyncConnectionInput = {
+	ownerUserId: number;
+	folderPath: string;
+	folderName: string;
+	collaborator: string | null;
+};
+
+type FileMetadata = {
+	id: number;
+	connectionId: number;
+	filename: string;
+	relativePath: string;
+	size: number | null;
+	lastModified: number;
+	contentHash: string | null;
+	isDirectory: boolean;
+	deleted: boolean;
+	createdAt: string;
+	updatedAt: string;
+};
+
+type FileMetadataInput = {
+	filename: string;
+	relativePath: string;
+	size: number | null;
+	lastModified: number;
+	contentHash?: string | null;
+	isDirectory?: boolean;
+	deleted?: boolean;
+};
+
 contextBridge.exposeInMainWorld('secureDrive', {
 	apiBaseUrl: __API_BASE_URL__,
 	pickFolder: (): Promise<string | null> => ipcRenderer.invoke('secure-drive:pick-folder'),
 	listFolder: (folderPath: string): Promise<FolderEntry[]> =>
 		ipcRenderer.invoke('secure-drive:list-folder', folderPath),
+	listSyncConnections: (ownerUserId: number): Promise<SyncConnection[]> =>
+		ipcRenderer.invoke('secure-drive:list-sync-connections', ownerUserId),
+	upsertSyncConnection: (input: SyncConnectionInput): Promise<SyncConnection | null> =>
+		ipcRenderer.invoke('secure-drive:upsert-sync-connection', input),
+	listFileMetadata: (connectionId: number): Promise<FileMetadata[]> =>
+		ipcRenderer.invoke('secure-drive:list-file-metadata', connectionId),
+	upsertFileMetadata: (connectionId: number, input: FileMetadataInput): Promise<FileMetadata | null> =>
+		ipcRenderer.invoke('secure-drive:upsert-file-metadata', connectionId, input),
+	replaceFileMetadata: (connectionId: number, files: FileMetadataInput[]): Promise<FileMetadata[]> =>
+		ipcRenderer.invoke('secure-drive:replace-file-metadata', connectionId, files),
 });

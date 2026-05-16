@@ -57,6 +57,15 @@ type FriendRequest = {
   created_at?: string;
 };
 
+type ConnectionRequest = {
+  id: number;
+  requester_id: number;
+  receiver_id: number;
+  title?: string;
+  description?: string;
+  created_at?: string;
+};
+
 type HomepageProps = {
   onLogout: () => void;
 };
@@ -69,14 +78,32 @@ export default function Homepage({ onLogout }: HomepageProps) {
   const [allUsers, setAllUsers] = useState<AppUser[]>([]);
   const [friends, setFriends] = useState<AppUser[]>([]);
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
+  const [connectionRequests, setConnectionRequests] = useState<ConnectionRequest[]>([]);
   const [socialLoading, setSocialLoading] = useState(false);
   const [socialError, setSocialError] = useState('');
   const [activeRequestId, setActiveRequestId] = useState<number | null>(null);
   const [sendingToUserId, setSendingToUserId] = useState<number | null>(null);
+  const [activeConnectionRequestId, setActiveConnectionRequestId] = useState<number | null>(null);
   const collaboratorsPanelRef = useRef<HTMLDivElement | null>(null);
   const collaboratorSearchRef = useRef<HTMLInputElement | null>(null);
 
-  const loadConnections = () => {
+  const loadConnections = async (ownerUserId?: number) => {
+    if (ownerUserId) {
+      try {
+        const rows = await window.secureDrive.listSyncConnections(ownerUserId);
+        setConnections(
+          rows.map((row) => ({
+            folderPath: row.folderPath,
+            folderName: row.folderName,
+            collaborator: row.collaborator ?? '',
+          })),
+        );
+        return;
+      } catch {
+        // Fall back to legacy localStorage data below.
+      }
+    }
+
     try {
       const raw = localStorage.getItem(CONNECTIONS_KEY);
       if (!raw) {
@@ -118,6 +145,13 @@ export default function Homepage({ onLogout }: HomepageProps) {
       setAllUsers(Array.isArray(usersData) ? usersData : []);
       setFriendRequests(Array.isArray(requestsData) ? requestsData : []);
       setFriends(Array.isArray(friendsData) ? friendsData : []);
+      const connectionRequestsResponse = await fetch(`${API_URL}/connection-requests/${currentUserId}`);
+      if (connectionRequestsResponse.ok) {
+        const connectionRequestsData = (await connectionRequestsResponse.json()) as ConnectionRequest[];
+        setConnectionRequests(Array.isArray(connectionRequestsData) ? connectionRequestsData : []);
+      } else {
+        setConnectionRequests([]);
+      }
     } catch (error) {
       setSocialError('Failed to load friends data. Please try again.');
       console.error('Failed to load social data:', error);
@@ -239,6 +273,116 @@ export default function Homepage({ onLogout }: HomepageProps) {
     }
   };
 
+  const cancelConnectionRequest = async (requestId: number) => {
+    if (!user) return;
+
+    setActiveConnectionRequestId(requestId);
+    setSocialError('');
+
+    try {
+      const response = await fetch(`${API_URL}/connection-requests/${requestId}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id }),
+      });
+
+      const data = await response.json();
+      if (data.status !== 'success') {
+        setSocialError(data.message || 'Unable to cancel connection request.');
+        return;
+      }
+
+      await loadSocialData(user.id);
+    } catch (error) {
+      setSocialError('Unable to cancel connection request right now.');
+      console.error('Failed to cancel connection request:', error);
+    } finally {
+      setActiveConnectionRequestId(null);
+    }
+  };
+
+  const rejectConnectionRequest = async (requestId: number) => {
+    if (!user) return;
+
+    setActiveConnectionRequestId(requestId);
+    setSocialError('');
+
+    try {
+      const response = await fetch(`${API_URL}/connection-requests/${requestId}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id }),
+      });
+
+      const data = await response.json();
+      if (data.status !== 'success') {
+        setSocialError(data.message || 'Unable to reject connection request.');
+        return;
+      }
+
+      await loadSocialData(user.id);
+    } catch (error) {
+      setSocialError('Unable to reject connection request right now.');
+      console.error('Failed to reject connection request:', error);
+    } finally {
+      setActiveConnectionRequestId(null);
+    }
+  };
+
+  const acceptConnectionRequest = async (request: ConnectionRequest) => {
+    if (!user) return;
+
+    setActiveConnectionRequestId(request.id);
+    setSocialError('');
+
+    try {
+      const selectedFolder = await window.secureDrive.pickFolder();
+      if (!selectedFolder) {
+        return;
+      }
+
+      try {
+        localStorage.setItem(SELECTED_FOLDER_KEY, selectedFolder);
+      } catch {
+        // Ignore localStorage write failures.
+      }
+
+      const folderName = selectedFolder.replace(/\\/g, '/').split('/').filter(Boolean).pop() ?? selectedFolder;
+      const requester = userLookup.get(request.requester_id);
+
+      try {
+        await window.secureDrive.upsertSyncConnection({
+          ownerUserId: user.id,
+          folderPath: selectedFolder,
+          folderName,
+          collaborator: requester?.name ?? requester?.handle ?? 'Unknown collaborator',
+        });
+      } catch (syncError) {
+        console.error('Failed to persist sync connection locally:', syncError);
+      }
+
+      const response = await fetch(`${API_URL}/connection-requests/${request.id}/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id }),
+      });
+
+      const data = await response.json();
+      if (data.status !== 'success') {
+        setSocialError(data.message || 'Unable to accept connection request.');
+        return;
+      }
+
+      await loadSocialData(user.id);
+      navigate('/files', { state: { folderPath: selectedFolder } });
+    } catch (error) {
+      setSocialError('Unable to accept connection request right now.');
+      console.error('Failed to accept connection request:', error);
+    } finally {
+      setActiveConnectionRequestId(null);
+    }
+  };
+
   const userLookup = useMemo(() => {
     const byId = new Map<number, AppUser>();
 
@@ -264,6 +408,16 @@ export default function Homepage({ onLogout }: HomepageProps) {
 
     return friendRequests.filter((request) => request.requester_id === user.id || request.receiver_id === user.id);
   }, [friendRequests, user]);
+
+  const pendingConnectionRequests = useMemo(() => {
+    if (!user) {
+      return [] as ConnectionRequest[];
+    }
+
+    return connectionRequests.filter(
+      (request) => request.requester_id === user.id || request.receiver_id === user.id,
+    );
+  }, [connectionRequests, user]);
 
   const blockedUserIds = useMemo(() => {
     if (!user) {
@@ -303,20 +457,17 @@ export default function Homepage({ onLogout }: HomepageProps) {
     const currentUser = readStoredUser();
     setUser(currentUser);
 
-    loadConnections();
+    void loadConnections(currentUser?.id);
 
     if (currentUser) {
       void loadSocialData(currentUser.id);
     }
 
     const onStorage = (event: StorageEvent) => {
-      if (event.key === CONNECTIONS_KEY) {
-        loadConnections();
-      }
-
       if (event.key === USER_KEY) {
         const refreshedUser = readStoredUser();
         setUser(refreshedUser);
+        void loadConnections(refreshedUser?.id);
         if (refreshedUser) {
           void loadSocialData(refreshedUser.id);
         } else {
@@ -391,7 +542,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
           <article className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg shadow-black/20 backdrop-blur">
             <p className="text-xs uppercase tracking-[0.16em] text-slate-300">Shared vaults</p>
             <p className="mt-3 text-3xl font-bold text-white">12</p>
-            <p className="mt-2 text-sm text-slate-300">{pendingRequests.length} pending requests</p>
+            <p className="mt-2 text-sm text-slate-300">{pendingConnectionRequests.length} pending connection requests</p>
           </article>
           <article className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg shadow-black/20 backdrop-blur">
             <p className="text-xs uppercase tracking-[0.16em] text-slate-300">Security score</p>
@@ -402,7 +553,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
 
         <section className="mt-8 grid gap-5 lg:grid-cols-3">
           <div className="rounded-2xl border border-white/10 bg-white/5 p-6 lg:col-span-2">
-            <h2 className="text-lg font-semibold text-white">Connections</h2>
+            <h2 className="text-lg font-semibold text-white">Active sync folders</h2>
             {connections.length === 0 ? (
               <p className="mt-4 text-sm text-slate-300">No secure folder connections yet.</p>
             ) : (
@@ -455,6 +606,82 @@ export default function Homepage({ onLogout }: HomepageProps) {
               </button>
             </div>
           </aside>
+        </section>
+
+        <section className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold text-white">Connection requests</h2>
+            <span className="text-xs uppercase tracking-[0.14em] text-slate-300">
+              Total: {pendingConnectionRequests.length}
+            </span>
+          </div>
+
+          {socialError && (
+            <div className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+              {socialError}
+            </div>
+          )}
+
+          {socialLoading ? (
+            <p className="mt-4 text-sm text-slate-400">Loading connection requests...</p>
+          ) : pendingConnectionRequests.length === 0 ? (
+            <p className="mt-4 text-sm text-slate-400">No connection requests yet.</p>
+          ) : (
+            <ul className="mt-4 space-y-3">
+              {pendingConnectionRequests.map((request) => {
+                const isIncoming = request.receiver_id === user?.id;
+                const otherUserId = isIncoming ? request.requester_id : request.receiver_id;
+                const otherUser = userLookup.get(otherUserId);
+
+                return (
+                  <li key={request.id} className="rounded-xl border border-white/10 bg-black/20 px-4 py-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-slate-100">
+                          {isIncoming ? 'From' : 'To'} {otherUser?.name ?? `User #${otherUserId}`}
+                        </p>
+                        <p className="text-xs text-slate-400">@{otherUser?.handle ?? 'unknown'}</p>
+                        <p className="mt-2 text-sm text-slate-300">{request.title ?? 'Connection request'}</p>
+                        <p className="mt-1 text-xs text-slate-400">{request.description ?? 'No description provided.'}</p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {isIncoming ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => void acceptConnectionRequest(request)}
+                              disabled={activeConnectionRequestId === request.id}
+                              className="rounded-lg bg-emerald-400 px-3 py-1 text-xs font-semibold uppercase tracking-[0.1em] text-emerald-950 transition hover:bg-emerald-300 disabled:opacity-60"
+                            >
+                              {activeConnectionRequestId === request.id ? 'Picking folder...' : 'Accept'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void rejectConnectionRequest(request.id)}
+                              disabled={activeConnectionRequestId === request.id}
+                              className="rounded-lg border border-rose-300/60 px-3 py-1 text-xs font-semibold uppercase tracking-[0.1em] text-rose-200 transition hover:bg-rose-500/20 disabled:opacity-60"
+                            >
+                              Reject
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => void cancelConnectionRequest(request.id)}
+                            disabled={activeConnectionRequestId === request.id}
+                            className="rounded-lg border border-amber-300/60 px-3 py-1 text-xs font-semibold uppercase tracking-[0.1em] text-amber-100 transition hover:bg-amber-400/20 disabled:opacity-60"
+                          >
+                            {activeConnectionRequestId === request.id ? 'Working...' : 'Cancel'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </section>
 
         <section
