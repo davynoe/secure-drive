@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 const USER_KEY = 'secure-drive-user';
@@ -123,7 +123,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
   const collaboratorsPanelRef = useRef<HTMLDivElement | null>(null);
   const collaboratorSearchRef = useRef<HTMLInputElement | null>(null);
 
-  const loadConnections = async (ownerUserId?: number) => {
+  const loadConnections = useCallback(async (ownerUserId?: number) => {
     if (ownerUserId) {
       try {
         const rows = await window.secureDrive.listSyncConnections(ownerUserId);
@@ -157,7 +157,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
     } catch {
       setConnections([]);
     }
-  };
+  }, []);
 
   const getRemoteConnectionIdFromRequest = (request: ConnectionRequest): number | null => {
     const candidate =
@@ -179,7 +179,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
     return null;
   };
 
-  const loadSocialData = async (currentUserId: number) => {
+  const loadSocialData = useCallback(async (currentUserId: number) => {
     setSocialLoading(true);
     setSocialError('');
 
@@ -197,6 +197,19 @@ export default function Homepage({ onLogout }: HomepageProps) {
       const usersData = (await allUsersResponse.json()) as AppUser[];
       const requestsData = (await requestsResponse.json()) as FriendRequest[];
       const friendsData = (await friendsResponse.json()) as AppUser[];
+      const socialLookup = new Map<number, AppUser | StoredUser>();
+
+      for (const candidate of usersData) {
+        socialLookup.set(candidate.id, candidate);
+      }
+
+      for (const friend of friendsData) {
+        socialLookup.set(friend.id, friend);
+      }
+
+      if (user && user.id === currentUserId) {
+        socialLookup.set(user.id, user);
+      }
 
       setAllUsers(Array.isArray(usersData) ? usersData : []);
       setFriendRequests(Array.isArray(requestsData) ? requestsData : []);
@@ -227,7 +240,10 @@ export default function Homepage({ onLogout }: HomepageProps) {
                 remoteConnectionId,
                 folderPath,
                 folderName,
-                collaborator: userLookup.get(request.receiver_id)?.name ?? userLookup.get(request.receiver_id)?.handle ?? 'Unknown collaborator',
+                collaborator:
+                  socialLookup.get(request.receiver_id)?.name ??
+                  socialLookup.get(request.receiver_id)?.handle ??
+                  'Unknown collaborator',
               });
             }),
           );
@@ -241,7 +257,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
     } finally {
       setSocialLoading(false);
     }
-  };
+  }, [user]);
 
   const sendFriendRequest = async (candidate: AppUser) => {
     if (!user) return;
@@ -548,12 +564,6 @@ export default function Homepage({ onLogout }: HomepageProps) {
     const currentUser = readStoredUser();
     setUser(currentUser);
 
-    void loadConnections(currentUser?.id);
-
-    if (currentUser) {
-      void loadSocialData(currentUser.id);
-    }
-
     const onStorage = (event: StorageEvent) => {
       if (event.key === USER_KEY) {
         const refreshedUser = readStoredUser();
@@ -571,7 +581,49 @@ export default function Homepage({ onLogout }: HomepageProps) {
 
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
-  }, []);
+  }, [loadConnections, loadSocialData]);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    let disposed = false;
+
+    const refreshData = () => {
+      if (disposed) {
+        return;
+      }
+
+      void loadConnections(user.id);
+      void loadSocialData(user.id);
+    };
+
+    refreshData();
+
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        refreshData();
+      }
+    }, 4000);
+
+    const onFocus = () => refreshData();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        refreshData();
+      }
+    };
+
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [user, loadConnections, loadSocialData]);
 
   const handlePickFolder = async () => {
     try {
@@ -603,7 +655,14 @@ export default function Homepage({ onLogout }: HomepageProps) {
           </div>
           <button
             type="button"
-            onClick={() => void window.secureDrive.syncNow()}
+            onClick={() => {
+              void (async () => {
+                await window.secureDrive.syncNow();
+                if (user) {
+                  await Promise.all([loadConnections(user.id), loadSocialData(user.id)]);
+                }
+              })();
+            }}
             className="rounded-xl border border-emerald-300/30 bg-emerald-400/10 px-4 py-2 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-300/20"
           >
             Sync now

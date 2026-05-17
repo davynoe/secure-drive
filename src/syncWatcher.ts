@@ -229,11 +229,17 @@ export function stopAllSyncWatchers(): void {
   }
 }
 
-export async function runWithConnectionRefreshSuppressed<T>(connectionId: number, task: () => Promise<T>): Promise<T> {
+export async function runWithConnectionRefreshSuppressed<T>(
+  connectionId: number,
+  task: () => Promise<T>,
+  options?: { schedulePendingRefresh?: boolean },
+): Promise<T> {
   const state = connectionWatchStates.get(connectionId);
   if (!state) {
     return task();
   }
+
+  const shouldSchedulePendingRefresh = options?.schedulePendingRefresh ?? true;
 
   state.refreshSuppressed = true;
 
@@ -243,8 +249,12 @@ export async function runWithConnectionRefreshSuppressed<T>(connectionId: number
     state.refreshSuppressed = false;
 
     if (state.pendingRefresh) {
-      state.pendingRefresh = false;
-      scheduleConnectionRefresh(connectionId);
+      if (shouldSchedulePendingRefresh) {
+        state.pendingRefresh = false;
+        scheduleConnectionRefresh(connectionId);
+      } else {
+        state.pendingRefresh = false;
+      }
     }
   }
 }

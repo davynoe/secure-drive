@@ -1,5 +1,5 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 const USER_KEY = 'secure-drive-user';
 const SELECTED_FOLDER_KEY = 'secure-drive-selected-folder';
@@ -41,7 +41,7 @@ export default function Homepage({ onLogout }) {
     const [activeConnectionRequestId, setActiveConnectionRequestId] = useState(null);
     const collaboratorsPanelRef = useRef(null);
     const collaboratorSearchRef = useRef(null);
-    const loadConnections = async (ownerUserId) => {
+    const loadConnections = useCallback(async (ownerUserId) => {
         if (ownerUserId) {
             try {
                 const rows = await window.secureDrive.listSyncConnections(ownerUserId);
@@ -72,7 +72,7 @@ export default function Homepage({ onLogout }) {
         catch {
             setConnections([]);
         }
-    };
+    }, []);
     const getRemoteConnectionIdFromRequest = (request) => {
         const candidate = request.connectionId ??
             request.remoteConnectionId ??
@@ -89,7 +89,7 @@ export default function Homepage({ onLogout }) {
         }
         return null;
     };
-    const loadSocialData = async (currentUserId) => {
+    const loadSocialData = useCallback(async (currentUserId) => {
         setSocialLoading(true);
         setSocialError('');
         try {
@@ -104,6 +104,16 @@ export default function Homepage({ onLogout }) {
             const usersData = (await allUsersResponse.json());
             const requestsData = (await requestsResponse.json());
             const friendsData = (await friendsResponse.json());
+            const socialLookup = new Map();
+            for (const candidate of usersData) {
+                socialLookup.set(candidate.id, candidate);
+            }
+            for (const friend of friendsData) {
+                socialLookup.set(friend.id, friend);
+            }
+            if (user && user.id === currentUserId) {
+                socialLookup.set(user.id, user);
+            }
             setAllUsers(Array.isArray(usersData) ? usersData : []);
             setFriendRequests(Array.isArray(requestsData) ? requestsData : []);
             setFriends(Array.isArray(friendsData) ? friendsData : []);
@@ -127,7 +137,9 @@ export default function Homepage({ onLogout }) {
                             remoteConnectionId,
                             folderPath,
                             folderName,
-                            collaborator: userLookup.get(request.receiver_id)?.name ?? userLookup.get(request.receiver_id)?.handle ?? 'Unknown collaborator',
+                            collaborator: socialLookup.get(request.receiver_id)?.name ??
+                                socialLookup.get(request.receiver_id)?.handle ??
+                                'Unknown collaborator',
                         });
                     }));
                 }
@@ -143,7 +155,7 @@ export default function Homepage({ onLogout }) {
         finally {
             setSocialLoading(false);
         }
-    };
+    }, [user]);
     const sendFriendRequest = async (candidate) => {
         if (!user)
             return;
@@ -411,10 +423,6 @@ export default function Homepage({ onLogout }) {
     useEffect(() => {
         const currentUser = readStoredUser();
         setUser(currentUser);
-        void loadConnections(currentUser?.id);
-        if (currentUser) {
-            void loadSocialData(currentUser.id);
-        }
         const onStorage = (event) => {
             if (event.key === USER_KEY) {
                 const refreshedUser = readStoredUser();
@@ -432,7 +440,40 @@ export default function Homepage({ onLogout }) {
         };
         window.addEventListener('storage', onStorage);
         return () => window.removeEventListener('storage', onStorage);
-    }, []);
+    }, [loadConnections, loadSocialData]);
+    useEffect(() => {
+        if (!user) {
+            return;
+        }
+        let disposed = false;
+        const refreshData = () => {
+            if (disposed) {
+                return;
+            }
+            void loadConnections(user.id);
+            void loadSocialData(user.id);
+        };
+        refreshData();
+        const intervalId = window.setInterval(() => {
+            if (document.visibilityState === 'visible') {
+                refreshData();
+            }
+        }, 4000);
+        const onFocus = () => refreshData();
+        const onVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                refreshData();
+            }
+        };
+        window.addEventListener('focus', onFocus);
+        document.addEventListener('visibilitychange', onVisibilityChange);
+        return () => {
+            disposed = true;
+            window.clearInterval(intervalId);
+            window.removeEventListener('focus', onFocus);
+            document.removeEventListener('visibilitychange', onVisibilityChange);
+        };
+    }, [user, loadConnections, loadSocialData]);
     const handlePickFolder = async () => {
         try {
             const selectedFolder = await window.secureDrive.pickFolder();

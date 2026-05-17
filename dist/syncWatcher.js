@@ -179,11 +179,12 @@ export function stopAllSyncWatchers() {
         clearConnectionWatchers(connectionId);
     }
 }
-export async function runWithConnectionRefreshSuppressed(connectionId, task) {
+export async function runWithConnectionRefreshSuppressed(connectionId, task, options) {
     const state = connectionWatchStates.get(connectionId);
     if (!state) {
         return task();
     }
+    const shouldSchedulePendingRefresh = options?.schedulePendingRefresh ?? true;
     state.refreshSuppressed = true;
     try {
         return await task();
@@ -191,8 +192,13 @@ export async function runWithConnectionRefreshSuppressed(connectionId, task) {
     finally {
         state.refreshSuppressed = false;
         if (state.pendingRefresh) {
-            state.pendingRefresh = false;
-            scheduleConnectionRefresh(connectionId);
+            if (shouldSchedulePendingRefresh) {
+                state.pendingRefresh = false;
+                scheduleConnectionRefresh(connectionId);
+            }
+            else {
+                state.pendingRefresh = false;
+            }
         }
     }
 }
