@@ -76,7 +76,7 @@ function createDatabaseConnection() {
     CREATE TABLE IF NOT EXISTS sync_connections (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       owner_user_id INTEGER NOT NULL,
-      remote_connection_id INTEGER UNIQUE,
+      remote_connection_id INTEGER,
       folder_path TEXT NOT NULL,
       folder_name TEXT NOT NULL,
       collaborator TEXT,
@@ -109,7 +109,83 @@ function createDatabaseConnection() {
       ON sync_connections(remote_connection_id);
   `);
 
+  migrateSyncConnectionsSchema(db);
+
   return db;
+}
+
+function migrateSyncConnectionsSchema(db: any) {
+  const tableInfo = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sync_connections'")
+    .get() as { sql?: string } | undefined;
+
+  if (!tableInfo?.sql) {
+    return;
+  }
+
+  const hasLegacyUniqueRemoteId =
+    /remote_connection_id\s+INTEGER\s+UNIQUE/i.test(tableInfo.sql) ||
+    /UNIQUE\s*\(\s*remote_connection_id\s*\)/i.test(tableInfo.sql);
+
+  if (!hasLegacyUniqueRemoteId) {
+    return;
+  }
+
+  db.exec('PRAGMA foreign_keys = OFF;');
+  db.exec('BEGIN TRANSACTION;');
+
+  try {
+    db.exec(`
+      CREATE TABLE sync_connections_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        owner_user_id INTEGER NOT NULL,
+        remote_connection_id INTEGER,
+        folder_path TEXT NOT NULL,
+        folder_name TEXT NOT NULL,
+        collaborator TEXT,
+        last_synced_change_id INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(owner_user_id, folder_path)
+      );
+
+      INSERT INTO sync_connections_new (
+        id,
+        owner_user_id,
+        remote_connection_id,
+        folder_path,
+        folder_name,
+        collaborator,
+        last_synced_change_id,
+        created_at,
+        updated_at
+      )
+      SELECT
+        id,
+        owner_user_id,
+        remote_connection_id,
+        folder_path,
+        folder_name,
+        collaborator,
+        last_synced_change_id,
+        created_at,
+        updated_at
+      FROM sync_connections;
+
+      DROP TABLE sync_connections;
+      ALTER TABLE sync_connections_new RENAME TO sync_connections;
+
+      CREATE INDEX IF NOT EXISTS idx_sync_connections_remote_connection_id
+        ON sync_connections(remote_connection_id);
+    `);
+
+    db.exec('COMMIT;');
+  } catch (error) {
+    db.exec('ROLLBACK;');
+    throw error;
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON;');
+  }
 }
 
 function getDatabase(): DatabaseConnection {

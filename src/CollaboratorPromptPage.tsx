@@ -19,6 +19,22 @@ type LocationState = {
 
 type InitialBaseChoice = 'user' | 'receiver';
 
+type ConnectionRequestCreateResponse = {
+  status?: string;
+  message?: string;
+  connectionId?: number;
+  remoteConnectionId?: number;
+  syncConnectionId?: number;
+  connection_id?: number;
+  connectionRequest?: {
+    id?: number;
+    connectionId?: number;
+    remoteConnectionId?: number;
+    syncConnectionId?: number;
+    connection_id?: number;
+  };
+};
+
 type StoredUser = {
   id: number;
   name: string;
@@ -133,16 +149,28 @@ export default function CollaboratorPromptPage() {
         }),
       });
 
-      const data = await response.json();
+      const data = (await response.json()) as ConnectionRequestCreateResponse;
       if (data.status !== 'success') {
         setError(data.message || 'Unable to create connection request.');
         return;
       }
 
+      const remoteConnectionId =
+        data.connectionId ??
+        data.remoteConnectionId ??
+        data.syncConnectionId ??
+        data.connection_id ??
+        data.connectionRequest?.id ??
+        data.connectionRequest?.connectionId ??
+        data.connectionRequest?.remoteConnectionId ??
+        data.connectionRequest?.syncConnectionId ??
+        data.connectionRequest?.connection_id ??
+        null;
+
       try {
         await window.secureDrive.upsertSyncConnection({
           ownerUserId: currentUser.id,
-          remoteConnectionId: null,
+          remoteConnectionId: typeof remoteConnectionId === 'number' ? remoteConnectionId : null,
           folderPath,
           folderName,
           collaborator: collaborator.name ?? collaborator.handle ?? 'Unknown collaborator',

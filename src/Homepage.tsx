@@ -67,6 +67,9 @@ type ConnectionRequest = {
   connectionId?: number;
   remoteConnectionId?: number;
   syncConnectionId?: number;
+  connection_id?: number;
+  remote_connection_id?: number;
+  sync_connection_id?: number;
   status?: string;
   created_at?: string;
 };
@@ -77,15 +80,25 @@ type ConnectionAcceptanceResponse = {
   connectionId?: number;
   remoteConnectionId?: number;
   syncConnectionId?: number;
+  connection_id?: number;
+  remote_connection_id?: number;
+  sync_connection_id?: number;
   connection?: {
     id?: number;
     remoteConnectionId?: number;
     syncConnectionId?: number;
+    connection_id?: number;
+    remote_connection_id?: number;
+    sync_connection_id?: number;
   };
   connectionRequest?: {
+    id?: number;
     connectionId?: number;
     remoteConnectionId?: number;
     syncConnectionId?: number;
+    connection_id?: number;
+    remote_connection_id?: number;
+    sync_connection_id?: number;
   };
 };
 
@@ -147,7 +160,14 @@ export default function Homepage({ onLogout }: HomepageProps) {
   };
 
   const getRemoteConnectionIdFromRequest = (request: ConnectionRequest): number | null => {
-    const candidate = request.connectionId ?? request.remoteConnectionId ?? request.syncConnectionId ?? null;
+    const candidate =
+      request.connectionId ??
+      request.remoteConnectionId ??
+      request.syncConnectionId ??
+      request.connection_id ??
+      request.remote_connection_id ??
+      request.sync_connection_id ??
+      null;
     return typeof candidate === 'number' ? candidate : null;
   };
 
@@ -426,17 +446,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
           return;
         }
 
-        const remoteConnectionId =
-          data.connectionId ??
-          data.remoteConnectionId ??
-          data.syncConnectionId ??
-          data.connection?.id ??
-          data.connection?.remoteConnectionId ??
-          data.connection?.syncConnectionId ??
-          data.connectionRequest?.connectionId ??
-          data.connectionRequest?.remoteConnectionId ??
-          data.connectionRequest?.syncConnectionId ??
-          null;
+        const remoteConnectionId = data.connectionId ?? null;
 
         if (typeof remoteConnectionId !== 'number') {
           setSocialError('Connection was accepted, but the server did not return a sync connection id.');
