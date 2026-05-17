@@ -17,6 +17,8 @@ type LocationState = {
   folderPath?: string;
 };
 
+type InitialBaseChoice = 'user' | 'receiver';
+
 type StoredUser = {
   id: number;
   name: string;
@@ -61,6 +63,7 @@ export default function CollaboratorPromptPage() {
   const [friends, setFriends] = useState<AppUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [sendingToUserId, setSendingToUserId] = useState<number | null>(null);
+  const [initialBaseChoice, setInitialBaseChoice] = useState<InitialBaseChoice>('user');
   const [error, setError] = useState('');
 
   const folderPath = locationState?.folderPath ?? '';
@@ -126,6 +129,7 @@ export default function CollaboratorPromptPage() {
           receiverId: collaborator.id,
           title: folderName,
           description: folderPath,
+          initialBaseId: initialBaseChoice === 'user' ? currentUser.id : collaborator.id,
         }),
       });
 
@@ -168,6 +172,49 @@ export default function CollaboratorPromptPage() {
           </section>
         ) : (
           <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
+            <fieldset className="rounded-xl border border-white/10 bg-black/20 p-4">
+              <legend className="px-1 text-sm font-medium text-slate-200">Initial base</legend>
+              <p className="mt-1 text-xs text-slate-400">Choose who starts with the base folder for this connection request.</p>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <label
+                  className={`flex cursor-pointer items-center justify-between rounded-xl border px-4 py-3 text-sm transition ${
+                    initialBaseChoice === 'user'
+                      ? 'border-emerald-300/50 bg-emerald-400/10 text-emerald-100'
+                      : 'border-white/10 bg-white/5 text-slate-200 hover:border-white/20'
+                  }`}
+                >
+                  <span className="font-medium">Me</span>
+                  <input
+                    type="radio"
+                    name="initial-base"
+                    value="user"
+                    checked={initialBaseChoice === 'user'}
+                    onChange={() => setInitialBaseChoice('user')}
+                    className="h-4 w-4 accent-emerald-400"
+                  />
+                </label>
+
+                <label
+                  className={`flex cursor-pointer items-center justify-between rounded-xl border px-4 py-3 text-sm transition ${
+                    initialBaseChoice === 'receiver'
+                      ? 'border-emerald-300/50 bg-emerald-400/10 text-emerald-100'
+                      : 'border-white/10 bg-white/5 text-slate-200 hover:border-white/20'
+                  }`}
+                >
+                  <span className="font-medium">Receiver</span>
+                  <input
+                    type="radio"
+                    name="initial-base"
+                    value="receiver"
+                    checked={initialBaseChoice === 'receiver'}
+                    onChange={() => setInitialBaseChoice('receiver')}
+                    className="h-4 w-4 accent-emerald-400"
+                  />
+                </label>
+              </div>
+            </fieldset>
+
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-lg font-semibold text-white">Your friends</h2>
               {loading && <span className="text-xs uppercase tracking-[0.14em] text-slate-300">Loading...</span>}

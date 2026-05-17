@@ -61,6 +61,7 @@ type ConnectionRequest = {
   id: number;
   requester_id: number;
   receiver_id: number;
+  initial_base_id?: number;
   title?: string;
   description?: string;
   created_at?: string;
