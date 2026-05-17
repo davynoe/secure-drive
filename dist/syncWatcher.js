@@ -4,6 +4,7 @@ import path from 'node:path';
 import { syncConnectionToBackend } from './backendSync';
 import { getSyncConnectionById, syncFileMetadataSnapshot } from './syncStore';
 const connectionWatchStates = new Map();
+const CONNECTION_POLL_INTERVAL_MS = 3000;
 async function collectDirectorySnapshot(folderPath) {
     const results = [];
     const visitDirectory = async (currentPath) => {
@@ -40,6 +41,7 @@ function clearConnectionWatchers(connectionId) {
     if (!state) {
         return;
     }
+    stopConnectionPolling(state);
     closeStateWatchers(state);
     connectionWatchStates.delete(connectionId);
 }
@@ -52,6 +54,35 @@ function closeStateWatchers(state) {
         clearTimeout(state.debounceTimer);
         state.debounceTimer = null;
     }
+}
+function stopConnectionPolling(state) {
+    if (!state.pollTimer) {
+        return;
+    }
+    clearInterval(state.pollTimer);
+    state.pollTimer = null;
+}
+function startConnectionPolling(connectionId) {
+    const state = connectionWatchStates.get(connectionId);
+    if (!state || state.pollTimer) {
+        return;
+    }
+    state.pollTimer = setInterval(() => {
+        const currentState = connectionWatchStates.get(connectionId);
+        if (!currentState || currentState.polling || currentState.refreshing) {
+            return;
+        }
+        const latestConnection = getSyncConnectionById(connectionId) ?? currentState.connection;
+        currentState.connection = latestConnection;
+        currentState.polling = true;
+        void syncConnectionToBackend(latestConnection).finally(() => {
+            const nextState = connectionWatchStates.get(connectionId);
+            if (!nextState) {
+                return;
+            }
+            nextState.polling = false;
+        });
+    }, CONNECTION_POLL_INTERVAL_MS);
 }
 async function createDirectoryWatchers(connection) {
     const watchedDirectories = new Set();
@@ -164,11 +195,14 @@ export function registerConnectionWatcher(connection) {
         connection,
         watchers: [],
         debounceTimer: null,
+        pollTimer: null,
         refreshing: false,
+        polling: false,
         pendingRefresh: false,
         refreshSuppressed: false,
     };
     connectionWatchStates.set(connection.id, state);
+    startConnectionPolling(connection.id);
     return refreshConnection(connection);
 }
 export async function initializeSyncWatchers(connections) {
