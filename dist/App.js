@@ -39,6 +39,14 @@ function writeStoredUser(user) {
         // Ignore localStorage write failures.
     }
 }
+function RefreshButton() {
+    const [isRefreshing, setIsRefreshing] = useState(false);
+    const handleRefresh = () => {
+        setIsRefreshing(true);
+        window.location.reload();
+    };
+    return (_jsx("button", { type: "button", onClick: handleRefresh, className: "fixed right-4 top-4 z-50 rounded-xl border border-emerald-300/40 bg-slate-950/80 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-200 shadow-lg shadow-black/30 backdrop-blur transition hover:bg-emerald-300/20", title: "Refresh app", "aria-label": "Refresh app", disabled: isRefreshing, children: isRefreshing ? 'Refreshing...' : 'Refresh' }, void 0));
+}
 export default function App() {
     const [isLoggedIn, setIsLoggedIn] = useState(() => readStoredUser() !== null);
     useEffect(() => {
@@ -59,6 +67,6 @@ export default function App() {
         writeStoredUser(null);
         setIsLoggedIn(false);
     };
-    return (_jsx(Router, { children: _jsxs(Routes, { children: [_jsx(Route, { path: "/", element: isLoggedIn ? _jsx(Homepage, { onLogout: handleLogout }, void 0) : _jsx(Navigate, { to: "/signup", replace: true }, void 0) }, void 0), _jsx(Route, { path: "/signup", element: !isLoggedIn ? _jsx(SignUpPage, { onSignUp: handleLogin }, void 0) : _jsx(Navigate, { to: "/", replace: true }, void 0) }, void 0), _jsx(Route, { path: "/login", element: !isLoggedIn ? _jsx(LoginPage, { onLogin: handleLogin }, void 0) : _jsx(Navigate, { to: "/", replace: true }, void 0) }, void 0), _jsx(Route, { path: "/connect-folder", element: isLoggedIn ? _jsx(CollaboratorPromptPage, {}, void 0) : _jsx(Navigate, { to: "/signup", replace: true }, void 0) }, void 0), _jsx(Route, { path: "/files", element: isLoggedIn ? _jsx(FolderContentsPage, {}, void 0) : _jsx(Navigate, { to: "/signup", replace: true }, void 0) }, void 0), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: isLoggedIn ? '/' : '/signup', replace: true }, void 0) }, void 0)] }, void 0) }, void 0));
+    return (_jsxs(Router, { children: [_jsx(RefreshButton, {}, void 0), _jsxs(Routes, { children: [_jsx(Route, { path: "/", element: isLoggedIn ? _jsx(Homepage, { onLogout: handleLogout }, void 0) : _jsx(Navigate, { to: "/signup", replace: true }, void 0) }, void 0), _jsx(Route, { path: "/signup", element: !isLoggedIn ? _jsx(SignUpPage, { onSignUp: handleLogin }, void 0) : _jsx(Navigate, { to: "/", replace: true }, void 0) }, void 0), _jsx(Route, { path: "/login", element: !isLoggedIn ? _jsx(LoginPage, { onLogin: handleLogin }, void 0) : _jsx(Navigate, { to: "/", replace: true }, void 0) }, void 0), _jsx(Route, { path: "/connect-folder", element: isLoggedIn ? _jsx(CollaboratorPromptPage, {}, void 0) : _jsx(Navigate, { to: "/signup", replace: true }, void 0) }, void 0), _jsx(Route, { path: "/files", element: isLoggedIn ? _jsx(FolderContentsPage, {}, void 0) : _jsx(Navigate, { to: "/signup", replace: true }, void 0) }, void 0), _jsx(Route, { path: "*", element: _jsx(Navigate, { to: isLoggedIn ? '/' : '/signup', replace: true }, void 0) }, void 0)] }, void 0)] }, void 0));
 }
 //# sourceMappingURL=App.js.map

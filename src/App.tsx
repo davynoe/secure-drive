@@ -50,6 +50,28 @@ function writeStoredUser(user: StoredUser | null): void {
   }
 }
 
+function RefreshButton() {
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = () => {
+    setIsRefreshing(true);
+    window.location.reload();
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleRefresh}
+      className="fixed right-4 top-4 z-50 rounded-xl border border-emerald-300/40 bg-slate-950/80 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-200 shadow-lg shadow-black/30 backdrop-blur transition hover:bg-emerald-300/20"
+      title="Refresh app"
+      aria-label="Refresh app"
+      disabled={isRefreshing}
+    >
+      {isRefreshing ? 'Refreshing...' : 'Refresh'}
+    </button>
+  );
+}
+
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => readStoredUser() !== null);
 
@@ -78,6 +100,7 @@ export default function App() {
 
   return (
     <Router>
+      <RefreshButton />
       <Routes>
         <Route
           path="/"

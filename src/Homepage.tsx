@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 const USER_KEY = 'secure-drive-user';
@@ -123,7 +123,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
   const collaboratorsPanelRef = useRef<HTMLDivElement | null>(null);
   const collaboratorSearchRef = useRef<HTMLInputElement | null>(null);
 
-  const loadConnections = useCallback(async (ownerUserId?: number) => {
+  const loadConnections = async (ownerUserId?: number) => {
     if (ownerUserId) {
       try {
         const rows = await window.secureDrive.listSyncConnections(ownerUserId);
@@ -157,7 +157,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
     } catch {
       setConnections([]);
     }
-  }, []);
+  };
 
   const getRemoteConnectionIdFromRequest = (request: ConnectionRequest): number | null => {
     const candidate =
@@ -179,7 +179,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
     return null;
   };
 
-  const loadSocialData = useCallback(async (currentUserId: number) => {
+  const loadSocialData = async (currentUserId: number) => {
     setSocialLoading(true);
     setSocialError('');
 
@@ -197,19 +197,6 @@ export default function Homepage({ onLogout }: HomepageProps) {
       const usersData = (await allUsersResponse.json()) as AppUser[];
       const requestsData = (await requestsResponse.json()) as FriendRequest[];
       const friendsData = (await friendsResponse.json()) as AppUser[];
-      const socialLookup = new Map<number, AppUser | StoredUser>();
-
-      for (const candidate of usersData) {
-        socialLookup.set(candidate.id, candidate);
-      }
-
-      for (const friend of friendsData) {
-        socialLookup.set(friend.id, friend);
-      }
-
-      if (user && user.id === currentUserId) {
-        socialLookup.set(user.id, user);
-      }
 
       setAllUsers(Array.isArray(usersData) ? usersData : []);
       setFriendRequests(Array.isArray(requestsData) ? requestsData : []);
@@ -240,10 +227,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
                 remoteConnectionId,
                 folderPath,
                 folderName,
-                collaborator:
-                  socialLookup.get(request.receiver_id)?.name ??
-                  socialLookup.get(request.receiver_id)?.handle ??
-                  'Unknown collaborator',
+                collaborator: userLookup.get(request.receiver_id)?.name ?? userLookup.get(request.receiver_id)?.handle ?? 'Unknown collaborator',
               });
             }),
           );
@@ -257,7 +241,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
     } finally {
       setSocialLoading(false);
     }
-  }, [user]);
+  };
 
   const sendFriendRequest = async (candidate: AppUser) => {
     if (!user) return;
@@ -564,6 +548,12 @@ export default function Homepage({ onLogout }: HomepageProps) {
     const currentUser = readStoredUser();
     setUser(currentUser);
 
+    void loadConnections(currentUser?.id);
+
+    if (currentUser) {
+      void loadSocialData(currentUser.id);
+    }
+
     const onStorage = (event: StorageEvent) => {
       if (event.key === USER_KEY) {
         const refreshedUser = readStoredUser();
@@ -581,49 +571,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
 
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
-  }, [loadConnections, loadSocialData]);
-
-  useEffect(() => {
-    if (!user) {
-      return;
-    }
-
-    let disposed = false;
-
-    const refreshData = () => {
-      if (disposed) {
-        return;
-      }
-
-      void loadConnections(user.id);
-      void loadSocialData(user.id);
-    };
-
-    refreshData();
-
-    const intervalId = window.setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        refreshData();
-      }
-    }, 4000);
-
-    const onFocus = () => refreshData();
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        refreshData();
-      }
-    };
-
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onVisibilityChange);
-
-    return () => {
-      disposed = true;
-      window.clearInterval(intervalId);
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onVisibilityChange);
-    };
-  }, [user, loadConnections, loadSocialData]);
+  }, []);
 
   const handlePickFolder = async () => {
     try {
@@ -645,7 +593,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
   return (
     <main className="min-h-screen bg-linear-to-br from-slate-950 via-slate-900 to-emerald-950 text-slate-100">
       <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-10 md:px-10 md:py-14">
-        <header className="mb-10 flex items-center justify-between">
+        <header className="mb-10">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-emerald-300/90">
               Secure Drive
@@ -653,20 +601,6 @@ export default function Homepage({ onLogout }: HomepageProps) {
             <h1 className="mt-2 text-3xl font-bold md:text-4xl">Homepage</h1>
             <p className="mt-2 text-sm text-slate-300">Welcome, {user?.name || user?.handle || 'Guest'}</p>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              void (async () => {
-                await window.secureDrive.syncNow();
-                if (user) {
-                  await Promise.all([loadConnections(user.id), loadSocialData(user.id)]);
-                }
-              })();
-            }}
-            className="rounded-xl border border-emerald-300/30 bg-emerald-400/10 px-4 py-2 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-300/20"
-          >
-            Sync now
-          </button>
         </header>
 
         <div className="mb-5 flex justify-end">
@@ -679,30 +613,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
           </button>
         </div>
 
-        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <article className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg shadow-black/20 backdrop-blur">
-            <p className="text-xs uppercase tracking-[0.16em] text-slate-300">Storage used</p>
-            <p className="mt-3 text-3xl font-bold text-white">128 GB</p>
-            <p className="mt-2 text-sm text-slate-300">of 512 GB plan</p>
-          </article>
-          <article className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg shadow-black/20 backdrop-blur">
-            <p className="text-xs uppercase tracking-[0.16em] text-slate-300">Synced files</p>
-            <p className="mt-3 text-3xl font-bold text-white">2,418</p>
-            <p className="mt-2 text-sm text-slate-300">updated in last 24h</p>
-          </article>
-          <article className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg shadow-black/20 backdrop-blur">
-            <p className="text-xs uppercase tracking-[0.16em] text-slate-300">Shared vaults</p>
-            <p className="mt-3 text-3xl font-bold text-white">12</p>
-            <p className="mt-2 text-sm text-slate-300">{pendingConnectionRequests.length} pending connection requests</p>
-          </article>
-          <article className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg shadow-black/20 backdrop-blur">
-            <p className="text-xs uppercase tracking-[0.16em] text-slate-300">Security score</p>
-            <p className="mt-3 text-3xl font-bold text-emerald-300">98%</p>
-            <p className="mt-2 text-sm text-slate-300">2FA enabled</p>
-          </article>
-        </section>
-
-        <section className="mt-8 grid gap-5 lg:grid-cols-3">
+        <section className="mt-2 grid gap-5 lg:grid-cols-3">
           <div className="rounded-2xl border border-white/10 bg-white/5 p-6 lg:col-span-2">
             <h2 className="text-lg font-semibold text-white">Active sync folders</h2>
             {connections.length === 0 ? (

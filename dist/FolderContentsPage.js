@@ -1,5 +1,5 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 const SELECTED_FOLDER_KEY = 'secure-drive-selected-folder';
 function formatSize(value) {
@@ -68,56 +68,6 @@ function findNodeByPath(nodes, targetPath) {
     }
     return null;
 }
-function collectExpandedDirectoryPaths(nodes) {
-    const paths = new Set();
-    const visit = (items) => {
-        for (const item of items) {
-            if (item.kind === 'directory' && item.isExpanded) {
-                paths.add(item.path);
-            }
-            if (item.children && item.children.length > 0) {
-                visit(item.children);
-            }
-        }
-    };
-    visit(nodes);
-    return paths;
-}
-async function hydrateExpandedNodes(nodes, expandedPaths) {
-    const hydratedNodes = await Promise.all(nodes.map(async (node) => {
-        if (node.kind !== 'directory' || !expandedPaths.has(node.path)) {
-            return {
-                ...node,
-                isExpanded: false,
-                isLoading: false,
-                loadError: null,
-                children: null,
-            };
-        }
-        try {
-            const childEntries = await window.secureDrive.listFolder(node.path);
-            const childNodes = toTreeNodes(childEntries);
-            const hydratedChildren = await hydrateExpandedNodes(childNodes, expandedPaths);
-            return {
-                ...node,
-                isExpanded: true,
-                isLoading: false,
-                loadError: null,
-                children: hydratedChildren,
-            };
-        }
-        catch {
-            return {
-                ...node,
-                isExpanded: true,
-                isLoading: false,
-                loadError: 'Could not read this folder.',
-                children: [],
-            };
-        }
-    }));
-    return hydratedNodes;
-}
 export default function FolderContentsPage() {
     const navigate = useNavigate();
     const location = useLocation();
@@ -126,10 +76,6 @@ export default function FolderContentsPage() {
     const [entries, setEntries] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
-    const entriesRef = useRef([]);
-    useEffect(() => {
-        entriesRef.current = entries;
-    }, [entries]);
     useEffect(() => {
         const selectedFromRoute = locationState?.folderPath ?? '';
         if (selectedFromRoute) {
@@ -150,61 +96,40 @@ export default function FolderContentsPage() {
             setFolderPath('');
         }
     }, [locationState]);
-    const refreshFolder = useCallback(async (silent) => {
-        if (!folderPath) {
-            setEntries([]);
-            setLoading(false);
-            setError('No folder selected yet.');
-            return;
-        }
-        if (!silent) {
+    useEffect(() => {
+        let isMounted = true;
+        const loadFolder = async () => {
+            if (!folderPath) {
+                setEntries([]);
+                setLoading(false);
+                setError('No folder selected yet.');
+                return;
+            }
             setLoading(true);
-        }
-        try {
-            const list = await window.secureDrive.listFolder(folderPath);
-            const rootNodes = toTreeNodes(list);
-            const expandedPaths = collectExpandedDirectoryPaths(entriesRef.current);
-            const hydratedNodes = await hydrateExpandedNodes(rootNodes, expandedPaths);
-            setEntries(hydratedNodes);
             setError('');
-        }
-        catch {
-            setEntries([]);
-            setError('Could not read this folder. Please pick another one.');
-        }
-        finally {
-            setLoading(false);
-        }
-    }, [folderPath]);
-    useEffect(() => {
-        void refreshFolder(false);
-    }, [refreshFolder]);
-    useEffect(() => {
-        if (!folderPath) {
-            return;
-        }
-        const refresh = () => {
-            void refreshFolder(true);
-        };
-        const intervalId = window.setInterval(() => {
-            if (document.visibilityState === 'visible') {
-                refresh();
+            try {
+                const list = await window.secureDrive.listFolder(folderPath);
+                if (!isMounted)
+                    return;
+                setEntries(toTreeNodes(list));
             }
-        }, 3000);
-        const onFocus = () => refresh();
-        const onVisibilityChange = () => {
-            if (document.visibilityState === 'visible') {
-                refresh();
+            catch {
+                if (!isMounted)
+                    return;
+                setEntries([]);
+                setError('Could not read this folder. Please pick another one.');
+            }
+            finally {
+                if (isMounted) {
+                    setLoading(false);
+                }
             }
         };
-        window.addEventListener('focus', onFocus);
-        document.addEventListener('visibilitychange', onVisibilityChange);
+        void loadFolder();
         return () => {
-            window.clearInterval(intervalId);
-            window.removeEventListener('focus', onFocus);
-            document.removeEventListener('visibilitychange', onVisibilityChange);
+            isMounted = false;
         };
-    }, [folderPath, refreshFolder]);
+    }, [folderPath]);
     const handleToggleFolder = async (nodePath) => {
         const targetNode = findNodeByPath(entries, nodePath);
         if (!targetNode || targetNode.kind !== 'directory') {
