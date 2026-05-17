@@ -1,7 +1,7 @@
 import { watch, type FSWatcher } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { syncConnectionToBackend } from './backendSync';
+import { pullRemoteChanges, syncConnectionToBackend } from './backendSync';
 import { getSyncConnectionById, syncFileMetadataSnapshot, type FileMetadataInput, type SyncConnection } from './syncStore';
 
 type ConnectionWatchState = {
@@ -104,7 +104,7 @@ function startConnectionPolling(connectionId: number): void {
     currentState.connection = latestConnection;
     currentState.polling = true;
 
-    void syncConnectionToBackend(latestConnection).finally(() => {
+    void pullRemoteChanges(latestConnection).finally(() => {
       const nextState = connectionWatchStates.get(connectionId);
       if (!nextState) {
         return;

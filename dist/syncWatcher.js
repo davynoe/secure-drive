@@ -1,7 +1,7 @@
 import { watch } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { syncConnectionToBackend } from './backendSync';
+import { pullRemoteChanges, syncConnectionToBackend } from './backendSync';
 import { getSyncConnectionById, syncFileMetadataSnapshot } from './syncStore';
 const connectionWatchStates = new Map();
 const CONNECTION_POLL_INTERVAL_MS = 3000;
@@ -75,7 +75,7 @@ function startConnectionPolling(connectionId) {
         const latestConnection = getSyncConnectionById(connectionId) ?? currentState.connection;
         currentState.connection = latestConnection;
         currentState.polling = true;
-        void syncConnectionToBackend(latestConnection).finally(() => {
+        void pullRemoteChanges(latestConnection).finally(() => {
             const nextState = connectionWatchStates.get(connectionId);
             if (!nextState) {
                 return;

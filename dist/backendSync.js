@@ -1,8 +1,11 @@
 import { createHash } from 'node:crypto';
+import { once } from 'node:events';
 import { promises as fs } from 'node:fs';
+import { createWriteStream } from 'node:fs';
 import path from 'node:path';
 import { listAllSyncConnections, listFileMetadata, replaceFileMetadataForConnection, updateSyncConnection, } from './syncStore';
 import { runWithConnectionRefreshSuppressed } from './syncWatcher';
+const MAX_UPLOAD_CHUNK_SIZE = 4 * 1024 * 1024;
 function getApiBaseUrl() {
     const value = typeof __API_BASE_URL__ === 'string' ? __API_BASE_URL__.trim() : '';
     return value.length > 0 ? value : null;
@@ -16,6 +19,17 @@ async function postJson(url, body) {
     if (!response.ok) {
         throw new Error(`Request failed with status ${response.status}`);
     }
+}
+async function postJsonAndRead(url, body) {
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+        throw new Error(`Request failed with status ${response.status}`);
+    }
+    return (await response.json());
 }
 function normalizeRelativePath(relativePath) {
     const normalized = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
@@ -67,34 +81,96 @@ function mapRemoteMetadataToLocalInput(file) {
         deleted: isRemoteDeleted(file),
     };
 }
-function hashContent(buffer) {
-    return createHash('sha256').update(buffer).digest('hex');
+async function uploadFileInChunks(connection, apiBaseUrl, relativePath) {
+    const localFilePath = getLocalAbsolutePath(connection, relativePath);
+    const stats = await fs.stat(localFilePath);
+    const uploadInit = await postJsonAndRead(`${apiBaseUrl}/sync/${connection.remoteConnectionId}/upload-init`, { actorUserId: connection.ownerUserId });
+    if (uploadInit.status && uploadInit.status !== 'success') {
+        throw new Error('Failed to initialize chunked upload.');
+    }
+    if (typeof uploadInit.uploadId !== 'string' || uploadInit.uploadId.length === 0) {
+        throw new Error('Upload id was not returned by the server.');
+    }
+    const handle = await fs.open(localFilePath, 'r');
+    const hash = createHash('sha256');
+    let totalChunks = 0;
+    let bytesReadTotal = 0;
+    try {
+        let position = 0;
+        while (position < stats.size) {
+            const buffer = Buffer.allocUnsafe(Math.min(MAX_UPLOAD_CHUNK_SIZE, stats.size - position));
+            const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
+            if (bytesRead <= 0) {
+                break;
+            }
+            const chunk = bytesRead === buffer.length ? buffer : buffer.subarray(0, bytesRead);
+            hash.update(chunk);
+            bytesReadTotal += bytesRead;
+            const chunkResponse = await postJsonAndRead(`${apiBaseUrl}/sync/${connection.remoteConnectionId}/upload-chunk`, {
+                actorUserId: connection.ownerUserId,
+                uploadId: uploadInit.uploadId,
+                chunkIndex: totalChunks,
+                contentBase64: chunk.toString('base64'),
+            });
+            if (chunkResponse.status && chunkResponse.status !== 'success') {
+                throw new Error(`Chunk ${totalChunks} upload failed.`);
+            }
+            position += bytesRead;
+            totalChunks += 1;
+        }
+    }
+    finally {
+        await handle.close();
+    }
+    const completeResponse = await postJsonAndRead(`${apiBaseUrl}/sync/${connection.remoteConnectionId}/upload-complete`, {
+        actorUserId: connection.ownerUserId,
+        uploadId: uploadInit.uploadId,
+        totalChunks,
+        relativePath,
+        filename: path.basename(relativePath),
+        contentHash: hash.digest('hex'),
+    });
+    if (completeResponse.status && completeResponse.status !== 'success') {
+        throw new Error('Failed to complete chunked upload.');
+    }
+    if (bytesReadTotal !== stats.size) {
+        throw new Error('Uploaded byte count did not match file size.');
+    }
 }
 async function pushLocalSnapshot(connection, apiBaseUrl) {
     const files = listFileMetadata(connection.id);
     for (const file of files) {
-        const payload = {
-            actorUserId: connection.ownerUserId,
-            relativePath: file.relativePath,
-            filename: file.filename,
-            isDirectory: file.isDirectory ? 1 : 0,
-            size: file.size,
-            contentHash: file.contentHash,
-            deleted: file.deleted ? 1 : 0,
-        };
-        if (!file.deleted && !file.isDirectory) {
-            const localFilePath = getLocalAbsolutePath(connection, file.relativePath);
-            try {
-                const content = await fs.readFile(localFilePath);
-                payload.contentBase64 = content.toString('base64');
-                payload.size = content.length;
-                payload.contentHash = hashContent(content);
-            }
-            catch {
-                payload.deleted = 1;
-            }
+        if (file.deleted) {
+            await postJson(`${apiBaseUrl}/sync/${connection.remoteConnectionId}/file`, {
+                actorUserId: connection.ownerUserId,
+                relativePath: file.relativePath,
+                filename: file.filename,
+                isDirectory: file.isDirectory ? 1 : 0,
+                size: file.size,
+                contentHash: file.contentHash,
+                deleted: 1,
+            });
+            continue;
         }
-        await postJson(`${apiBaseUrl}/sync/${connection.remoteConnectionId}/file`, payload);
+        if (file.isDirectory) {
+            await postJson(`${apiBaseUrl}/sync/${connection.remoteConnectionId}/directory`, {
+                actorUserId: connection.ownerUserId,
+                relativePath: file.relativePath,
+            });
+            continue;
+        }
+        try {
+            await uploadFileInChunks(connection, apiBaseUrl, file.relativePath);
+        }
+        catch {
+            await postJson(`${apiBaseUrl}/sync/${connection.remoteConnectionId}/file`, {
+                actorUserId: connection.ownerUserId,
+                relativePath: file.relativePath,
+                filename: file.filename,
+                isDirectory: 0,
+                deleted: 1,
+            });
+        }
     }
 }
 async function getRemoteChanges(connection, apiBaseUrl) {
@@ -119,13 +195,32 @@ async function getRemoteFiles(connection, apiBaseUrl) {
     }
     return data.files;
 }
-async function downloadRemoteFile(connection, apiBaseUrl, relativePath) {
+async function downloadRemoteFile(connection, apiBaseUrl, relativePath, destinationPath) {
     const fileResponse = await fetch(`${apiBaseUrl}/sync/${connection.remoteConnectionId}/file?userId=${encodeURIComponent(String(connection.ownerUserId))}&path=${encodeURIComponent(relativePath)}`);
     if (!fileResponse.ok) {
         throw new Error(`Failed to download file (${fileResponse.status}) for ${relativePath}`);
     }
-    const arrayBuffer = await fileResponse.arrayBuffer();
-    return Buffer.from(arrayBuffer);
+    if (!fileResponse.body) {
+        throw new Error(`File response for ${relativePath} is not streamable.`);
+    }
+    await fs.mkdir(path.dirname(destinationPath), { recursive: true });
+    const writer = createWriteStream(destinationPath, { flags: 'w' });
+    const reader = fileResponse.body.getReader();
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+                break;
+            }
+            if (!writer.write(Buffer.from(value))) {
+                await once(writer, 'drain');
+            }
+        }
+    }
+    finally {
+        writer.end();
+        await once(writer, 'finish');
+    }
 }
 function collectChangedPaths(changes) {
     const paths = new Set();
@@ -171,11 +266,37 @@ async function applyRemoteChangesToLocal(connection, apiBaseUrl, changes, remote
                 await fs.mkdir(localPath, { recursive: true });
                 continue;
             }
-            await fs.mkdir(path.dirname(localPath), { recursive: true });
-            const content = await downloadRemoteFile(connection, apiBaseUrl, relativePath);
-            await fs.writeFile(localPath, content);
+            await downloadRemoteFile(connection, apiBaseUrl, relativePath, localPath);
         }
     }, { schedulePendingRefresh: false });
+}
+export async function pullRemoteChanges(connection, apiBaseUrl) {
+    const resolvedApiBaseUrl = apiBaseUrl ?? getApiBaseUrl();
+    if (!resolvedApiBaseUrl || connection.remoteConnectionId === null) {
+        return;
+    }
+    try {
+        const changes = await getRemoteChanges(connection, resolvedApiBaseUrl);
+        if (changes.length === 0) {
+            return;
+        }
+        const foreignChanges = changes.filter((change) => {
+            const actorUserId = change.actorUserId ?? change.actor_user_id;
+            return typeof actorUserId !== 'number' || actorUserId !== connection.ownerUserId;
+        });
+        if (foreignChanges.length > 0) {
+            const remoteFiles = await getRemoteFiles(connection, resolvedApiBaseUrl);
+            await applyRemoteChangesToLocal(connection, resolvedApiBaseUrl, foreignChanges, remoteFiles);
+            const metadataInputs = remoteFiles
+                .map((file) => mapRemoteMetadataToLocalInput(file))
+                .filter((file) => file !== null);
+            replaceFileMetadataForConnection(connection.id, metadataInputs);
+        }
+        updateCursorFromChanges(connection, changes);
+    }
+    catch (error) {
+        console.error(`Failed to pull remote changes for connection ${connection.id}:`, error);
+    }
 }
 function updateCursorFromChanges(connection, changes) {
     const lastChangeId = changes.reduce((maxId, change) => {
@@ -195,23 +316,7 @@ export async function syncConnectionToBackend(connection) {
     }
     try {
         await pushLocalSnapshot(connection, apiBaseUrl);
-        const changes = await getRemoteChanges(connection, apiBaseUrl);
-        if (changes.length === 0) {
-            return;
-        }
-        const foreignChanges = changes.filter((change) => {
-            const actorUserId = change.actorUserId ?? change.actor_user_id;
-            return typeof actorUserId !== 'number' || actorUserId !== connection.ownerUserId;
-        });
-        if (foreignChanges.length > 0) {
-            const remoteFiles = await getRemoteFiles(connection, apiBaseUrl);
-            await applyRemoteChangesToLocal(connection, apiBaseUrl, foreignChanges, remoteFiles);
-            const metadataInputs = remoteFiles
-                .map((file) => mapRemoteMetadataToLocalInput(file))
-                .filter((file) => file !== null);
-            replaceFileMetadataForConnection(connection.id, metadataInputs);
-        }
-        updateCursorFromChanges(connection, changes);
+        await pullRemoteChanges(connection, apiBaseUrl);
     }
     catch (error) {
         console.error(`Failed to sync connection ${connection.id}:`, error);
