@@ -6,18 +6,27 @@ import path from 'node:path';
 export type SyncConnection = {
   id: number;
   ownerUserId: number;
+  remoteConnectionId: number | null;
   folderPath: string;
   folderName: string;
   collaborator: string | null;
+  lastSyncedChangeId: number;
   createdAt: string;
   updatedAt: string;
 };
 
 export type SyncConnectionInput = {
   ownerUserId: number;
+  remoteConnectionId?: number | null;
   folderPath: string;
   folderName: string;
   collaborator: string | null;
+  lastSyncedChangeId?: number;
+};
+
+export type SyncConnectionUpdate = {
+  remoteConnectionId?: number | null;
+  lastSyncedChangeId?: number;
 };
 
 export type FileMetadata = {
@@ -67,9 +76,11 @@ function createDatabaseConnection() {
     CREATE TABLE IF NOT EXISTS sync_connections (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       owner_user_id INTEGER NOT NULL,
+      remote_connection_id INTEGER UNIQUE,
       folder_path TEXT NOT NULL,
       folder_name TEXT NOT NULL,
       collaborator TEXT,
+      last_synced_change_id INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(owner_user_id, folder_path)
@@ -93,6 +104,9 @@ function createDatabaseConnection() {
 
     CREATE INDEX IF NOT EXISTS idx_file_metadata_connection_id
       ON file_metadata(connection_id);
+
+    CREATE INDEX IF NOT EXISTS idx_sync_connections_remote_connection_id
+      ON sync_connections(remote_connection_id);
   `);
 
   return db;
@@ -109,18 +123,22 @@ function getDatabase(): DatabaseConnection {
 function mapSyncConnection(row: {
   id: number;
   owner_user_id: number;
+  remote_connection_id: number | null;
   folder_path: string;
   folder_name: string;
   collaborator: string | null;
+  last_synced_change_id: number;
   created_at: string;
   updated_at: string;
 }): SyncConnection {
   return {
     id: row.id,
     ownerUserId: row.owner_user_id,
+    remoteConnectionId: row.remote_connection_id,
     folderPath: row.folder_path,
     folderName: row.folder_name,
     collaborator: row.collaborator,
+    lastSyncedChangeId: row.last_synced_change_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -158,30 +176,48 @@ export function upsertSyncConnection(input: SyncConnectionInput): SyncConnection
   const db = getDatabase();
 
   const stmt = db.prepare(`
-    INSERT INTO sync_connections (owner_user_id, folder_path, folder_name, collaborator)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO sync_connections (
+      owner_user_id,
+      remote_connection_id,
+      folder_path,
+      folder_name,
+      collaborator,
+      last_synced_change_id
+    )
+    VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(owner_user_id, folder_path) DO UPDATE SET
+      remote_connection_id = excluded.remote_connection_id,
       folder_name = excluded.folder_name,
       collaborator = excluded.collaborator,
+      last_synced_change_id = excluded.last_synced_change_id,
       updated_at = CURRENT_TIMESTAMP
   `);
 
-  stmt.run(input.ownerUserId, input.folderPath, input.folderName, input.collaborator);
+  stmt.run(
+    input.ownerUserId,
+    input.remoteConnectionId ?? null,
+    input.folderPath,
+    input.folderName,
+    input.collaborator,
+    input.lastSyncedChangeId ?? 0,
+  );
   return getSyncConnectionByFolderPath(input.ownerUserId, input.folderPath) as SyncConnection;
 }
 
 export function getSyncConnectionByFolderPath(ownerUserId: number, folderPath: string): SyncConnection | null {
   const db = getDatabase();
   const stmt = db.prepare(
-    'SELECT id, owner_user_id, folder_path, folder_name, collaborator, created_at, updated_at FROM sync_connections WHERE owner_user_id = ? AND folder_path = ?'
+    'SELECT id, owner_user_id, remote_connection_id, folder_path, folder_name, collaborator, last_synced_change_id, created_at, updated_at FROM sync_connections WHERE owner_user_id = ? AND folder_path = ?'
   );
   const row = stmt.get(ownerUserId, folderPath) as
     | {
         id: number;
         owner_user_id: number;
+        remote_connection_id: number | null;
         folder_path: string;
         folder_name: string;
         collaborator: string | null;
+        last_synced_change_id: number;
         created_at: string;
         updated_at: string;
       }
@@ -193,14 +229,16 @@ export function getSyncConnectionByFolderPath(ownerUserId: number, folderPath: s
 export function listSyncConnections(ownerUserId: number): SyncConnection[] {
   const db = getDatabase();
   const stmt = db.prepare(
-    'SELECT id, owner_user_id, folder_path, folder_name, collaborator, created_at, updated_at FROM sync_connections WHERE owner_user_id = ? ORDER BY updated_at DESC'
+    'SELECT id, owner_user_id, remote_connection_id, folder_path, folder_name, collaborator, last_synced_change_id, created_at, updated_at FROM sync_connections WHERE owner_user_id = ? ORDER BY updated_at DESC'
   );
   const rows = stmt.all(ownerUserId) as Array<{
     id: number;
     owner_user_id: number;
+    remote_connection_id: number | null;
     folder_path: string;
     folder_name: string;
     collaborator: string | null;
+    last_synced_change_id: number;
     created_at: string;
     updated_at: string;
   }>;
@@ -211,19 +249,68 @@ export function listSyncConnections(ownerUserId: number): SyncConnection[] {
 export function listAllSyncConnections(): SyncConnection[] {
   const db = getDatabase();
   const stmt = db.prepare(
-    'SELECT id, owner_user_id, folder_path, folder_name, collaborator, created_at, updated_at FROM sync_connections ORDER BY updated_at DESC'
+    'SELECT id, owner_user_id, remote_connection_id, folder_path, folder_name, collaborator, last_synced_change_id, created_at, updated_at FROM sync_connections ORDER BY updated_at DESC'
   );
   const rows = stmt.all() as Array<{
     id: number;
     owner_user_id: number;
+    remote_connection_id: number | null;
     folder_path: string;
     folder_name: string;
     collaborator: string | null;
+    last_synced_change_id: number;
     created_at: string;
     updated_at: string;
   }>;
 
   return rows.map(mapSyncConnection);
+}
+
+export function getSyncConnectionById(connectionId: number): SyncConnection | null {
+  const db = getDatabase();
+  const stmt = db.prepare(
+    'SELECT id, owner_user_id, remote_connection_id, folder_path, folder_name, collaborator, last_synced_change_id, created_at, updated_at FROM sync_connections WHERE id = ?'
+  );
+  const row = stmt.get(connectionId) as
+    | {
+        id: number;
+        owner_user_id: number;
+        remote_connection_id: number | null;
+        folder_path: string;
+        folder_name: string;
+        collaborator: string | null;
+        last_synced_change_id: number;
+        created_at: string;
+        updated_at: string;
+      }
+    | undefined;
+
+  return row ? mapSyncConnection(row) : null;
+}
+
+export function updateSyncConnection(connectionId: number, updates: SyncConnectionUpdate): SyncConnection | null {
+  const db = getDatabase();
+  const current = getSyncConnectionById(connectionId);
+  if (!current) {
+    return null;
+  }
+
+  const stmt = db.prepare(`
+    UPDATE sync_connections
+    SET
+      remote_connection_id = COALESCE(?, remote_connection_id),
+      last_synced_change_id = COALESCE(?, last_synced_change_id),
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `);
+
+  stmt.run(
+    typeof updates.remoteConnectionId === 'undefined' ? null : updates.remoteConnectionId,
+    typeof updates.lastSyncedChangeId === 'undefined' ? null : updates.lastSyncedChangeId,
+    connectionId,
+  );
+
+  return getSyncConnectionById(connectionId);
 }
 
 export function upsertFileMetadata(connectionId: number, input: FileMetadataInput): FileMetadata {
@@ -248,6 +335,14 @@ export function upsertFileMetadata(connectionId: number, input: FileMetadataInpu
       is_directory = excluded.is_directory,
       deleted = excluded.deleted,
       updated_at = CURRENT_TIMESTAMP
+    WHERE NOT (
+      filename = excluded.filename
+      AND (size = excluded.size OR (size IS NULL AND excluded.size IS NULL))
+      AND last_modified = excluded.last_modified
+      AND (content_hash = excluded.content_hash OR (content_hash IS NULL AND excluded.content_hash IS NULL))
+      AND is_directory = excluded.is_directory
+      AND deleted = excluded.deleted
+    )
   `);
 
   stmt.run(
@@ -379,13 +474,21 @@ export function syncFileMetadataSnapshot(connectionId: number, files: FileMetada
       is_directory = excluded.is_directory,
       deleted = excluded.deleted,
       updated_at = CURRENT_TIMESTAMP
+    WHERE NOT (
+      filename = excluded.filename
+      AND (size = excluded.size OR (size IS NULL AND excluded.size IS NULL))
+      AND last_modified = excluded.last_modified
+      AND (content_hash = excluded.content_hash OR (content_hash IS NULL AND excluded.content_hash IS NULL))
+      AND is_directory = excluded.is_directory
+      AND deleted = excluded.deleted
+    )
   `);
 
   const markDeletedStmt = db.prepare(
-    'UPDATE file_metadata SET deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE connection_id = ? AND relative_path = ?'
+    'UPDATE file_metadata SET deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE connection_id = ? AND relative_path = ? AND deleted = 0'
   );
   const markPresentStmt = db.prepare(
-    'UPDATE file_metadata SET deleted = 0, updated_at = CURRENT_TIMESTAMP WHERE connection_id = ? AND relative_path = ?'
+    'UPDATE file_metadata SET deleted = 0, updated_at = CURRENT_TIMESTAMP WHERE connection_id = ? AND relative_path = ? AND deleted = 1'
   );
 
   const tx = db.transaction((entries: FileMetadataInput[]) => {

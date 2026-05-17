@@ -10,18 +10,22 @@ type FolderEntry = {
 type SyncConnection = {
 	id: number;
 	ownerUserId: number;
+	remoteConnectionId: number | null;
 	folderPath: string;
 	folderName: string;
 	collaborator: string | null;
+	lastSyncedChangeId: number;
 	createdAt: string;
 	updatedAt: string;
 };
 
 type SyncConnectionInput = {
 	ownerUserId: number;
+	remoteConnectionId?: number | null;
 	folderPath: string;
 	folderName: string;
 	collaborator: string | null;
+	lastSyncedChangeId?: number;
 };
 
 type FileMetadata = {
@@ -58,5 +62,6 @@ interface Window {
 		listFileMetadata: (connectionId: number) => Promise<FileMetadata[]>;
 		upsertFileMetadata: (connectionId: number, input: FileMetadataInput) => Promise<FileMetadata | null>;
 		replaceFileMetadata: (connectionId: number, files: FileMetadataInput[]) => Promise<FileMetadata[]>;
+		syncNow: () => Promise<boolean>;
 	};
 }

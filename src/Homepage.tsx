@@ -64,7 +64,29 @@ type ConnectionRequest = {
   initial_base_id?: number;
   title?: string;
   description?: string;
+  connectionId?: number;
+  remoteConnectionId?: number;
+  syncConnectionId?: number;
+  status?: string;
   created_at?: string;
+};
+
+type ConnectionAcceptanceResponse = {
+  status?: string;
+  message?: string;
+  connectionId?: number;
+  remoteConnectionId?: number;
+  syncConnectionId?: number;
+  connection?: {
+    id?: number;
+    remoteConnectionId?: number;
+    syncConnectionId?: number;
+  };
+  connectionRequest?: {
+    connectionId?: number;
+    remoteConnectionId?: number;
+    syncConnectionId?: number;
+  };
 };
 
 type HomepageProps = {
@@ -124,6 +146,19 @@ export default function Homepage({ onLogout }: HomepageProps) {
     }
   };
 
+  const getRemoteConnectionIdFromRequest = (request: ConnectionRequest): number | null => {
+    const candidate = request.connectionId ?? request.remoteConnectionId ?? request.syncConnectionId ?? null;
+    return typeof candidate === 'number' ? candidate : null;
+  };
+
+  const getRequestFolderPath = (request: ConnectionRequest): string | null => {
+    if (typeof request.description === 'string' && request.description.trim()) {
+      return request.description;
+    }
+
+    return null;
+  };
+
   const loadSocialData = async (currentUserId: number) => {
     setSocialLoading(true);
     setSocialError('');
@@ -150,6 +185,33 @@ export default function Homepage({ onLogout }: HomepageProps) {
       if (connectionRequestsResponse.ok) {
         const connectionRequestsData = (await connectionRequestsResponse.json()) as ConnectionRequest[];
         setConnectionRequests(Array.isArray(connectionRequestsData) ? connectionRequestsData : []);
+
+        if (Array.isArray(connectionRequestsData)) {
+          await Promise.all(
+            connectionRequestsData.map(async (request) => {
+              if (request.requester_id !== currentUserId) {
+                return;
+              }
+
+              const remoteConnectionId = getRemoteConnectionIdFromRequest(request);
+              const folderPath = getRequestFolderPath(request);
+              if (remoteConnectionId === null || !folderPath) {
+                return;
+              }
+
+              const folderName =
+                request.title?.trim() || folderPath.replace(/\\/g, '/').split('/').filter(Boolean).pop() || folderPath;
+
+              await window.secureDrive.upsertSyncConnection({
+                ownerUserId: currentUserId,
+                remoteConnectionId,
+                folderPath,
+                folderName,
+                collaborator: userLookup.get(request.receiver_id)?.name ?? userLookup.get(request.receiver_id)?.handle ?? 'Unknown collaborator',
+              });
+            }),
+          );
+        }
       } else {
         setConnectionRequests([]);
       }
@@ -352,26 +414,44 @@ export default function Homepage({ onLogout }: HomepageProps) {
       const requester = userLookup.get(request.requester_id);
 
       try {
+        const response = await fetch(`${API_URL}/connection-requests/${request.id}/accept`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: user.id }),
+        });
+
+        const data = (await response.json()) as ConnectionAcceptanceResponse;
+        if (data.status !== 'success') {
+          setSocialError(data.message || 'Unable to accept connection request.');
+          return;
+        }
+
+        const remoteConnectionId =
+          data.connectionId ??
+          data.remoteConnectionId ??
+          data.syncConnectionId ??
+          data.connection?.id ??
+          data.connection?.remoteConnectionId ??
+          data.connection?.syncConnectionId ??
+          data.connectionRequest?.connectionId ??
+          data.connectionRequest?.remoteConnectionId ??
+          data.connectionRequest?.syncConnectionId ??
+          null;
+
+        if (typeof remoteConnectionId !== 'number') {
+          setSocialError('Connection was accepted, but the server did not return a sync connection id.');
+          return;
+        }
+
         await window.secureDrive.upsertSyncConnection({
           ownerUserId: user.id,
+          remoteConnectionId,
           folderPath: selectedFolder,
           folderName,
           collaborator: requester?.name ?? requester?.handle ?? 'Unknown collaborator',
         });
       } catch (syncError) {
         console.error('Failed to persist sync connection locally:', syncError);
-      }
-
-      const response = await fetch(`${API_URL}/connection-requests/${request.id}/accept`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id }),
-      });
-
-      const data = await response.json();
-      if (data.status !== 'success') {
-        setSocialError(data.message || 'Unable to accept connection request.');
-        return;
       }
 
       await loadSocialData(user.id);
@@ -513,6 +593,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
           </div>
           <button
             type="button"
+            onClick={() => void window.secureDrive.syncNow()}
             className="rounded-xl border border-emerald-300/30 bg-emerald-400/10 px-4 py-2 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-300/20"
           >
             Sync now

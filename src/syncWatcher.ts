@@ -1,7 +1,8 @@
 import { watch, type FSWatcher } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { syncFileMetadataSnapshot, type FileMetadataInput, type SyncConnection } from './syncStore';
+import { syncConnectionToBackend } from './backendSync';
+import { getSyncConnectionById, syncFileMetadataSnapshot, type FileMetadataInput, type SyncConnection } from './syncStore';
 
 type ConnectionWatchState = {
   connection: SyncConnection;
@@ -9,6 +10,7 @@ type ConnectionWatchState = {
   debounceTimer: NodeJS.Timeout | null;
   refreshing: boolean;
   pendingRefresh: boolean;
+  refreshSuppressed: boolean;
 };
 
 const connectionWatchStates = new Map<number, ConnectionWatchState>();
@@ -142,6 +144,10 @@ async function refreshConnection(connection: SyncConnection): Promise<void> {
     syncFileMetadataSnapshot(connection.id, []);
   }
 
+  const latestConnection = getSyncConnectionById(connection.id) ?? connection;
+  state.connection = latestConnection;
+  void syncConnectionToBackend(latestConnection);
+
   closeStateWatchers(state);
 
   try {
@@ -160,6 +166,11 @@ async function refreshConnection(connection: SyncConnection): Promise<void> {
 function scheduleConnectionRefresh(connectionId: number): void {
   const state = connectionWatchStates.get(connectionId);
   if (!state) {
+    return;
+  }
+
+  if (state.refreshSuppressed) {
+    state.pendingRefresh = true;
     return;
   }
 
@@ -201,6 +212,7 @@ export function registerConnectionWatcher(connection: SyncConnection): Promise<v
     debounceTimer: null,
     refreshing: false,
     pendingRefresh: false,
+    refreshSuppressed: false,
   };
 
   connectionWatchStates.set(connection.id, state);
@@ -214,5 +226,25 @@ export async function initializeSyncWatchers(connections: SyncConnection[]): Pro
 export function stopAllSyncWatchers(): void {
   for (const connectionId of connectionWatchStates.keys()) {
     clearConnectionWatchers(connectionId);
+  }
+}
+
+export async function runWithConnectionRefreshSuppressed<T>(connectionId: number, task: () => Promise<T>): Promise<T> {
+  const state = connectionWatchStates.get(connectionId);
+  if (!state) {
+    return task();
+  }
+
+  state.refreshSuppressed = true;
+
+  try {
+    return await task();
+  } finally {
+    state.refreshSuppressed = false;
+
+    if (state.pendingRefresh) {
+      state.pendingRefresh = false;
+      scheduleConnectionRefresh(connectionId);
+    }
   }
 }

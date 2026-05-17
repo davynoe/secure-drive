@@ -139,6 +139,18 @@ export default function CollaboratorPromptPage() {
         return;
       }
 
+      try {
+        await window.secureDrive.upsertSyncConnection({
+          ownerUserId: currentUser.id,
+          remoteConnectionId: null,
+          folderPath,
+          folderName,
+          collaborator: collaborator.name ?? collaborator.handle ?? 'Unknown collaborator',
+        });
+      } catch (persistError) {
+        console.error('Failed to persist local sync connection:', persistError);
+      }
+
       navigate('/', { replace: true });
     } catch (requestError) {
       setError('Unable to send connection request right now.');

@@ -10,7 +10,10 @@ import {
   upsertFileMetadata,
   upsertSyncConnection,
 } from './syncStore';
+import { syncAllConnections } from './backendSync';
 import { initializeSyncWatchers, registerConnectionWatcher, stopAllSyncWatchers } from './syncWatcher';
+
+declare const __API_BASE_URL__: string;
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -59,7 +62,7 @@ function createTray(): void {
     {
       label: 'Sync Now',
       click: () => {
-        // Intentionally left blank for now.
+        void syncAllConnections();
       },
     },
     {
@@ -129,9 +132,11 @@ type FolderEntry = {
 
 type SyncConnectionInput = {
   ownerUserId: number;
+  remoteConnectionId?: number | null;
   folderPath: string;
   folderName: string;
   collaborator: string | null;
+  lastSyncedChangeId?: number;
 };
 
 type FileMetadataInput = {
@@ -218,9 +223,11 @@ ipcMain.handle('secure-drive:upsert-sync-connection', async (_event, input: Sync
 
   const connection = upsertSyncConnection({
     ownerUserId: input.ownerUserId,
+    remoteConnectionId: typeof input.remoteConnectionId === 'number' ? input.remoteConnectionId : null,
     folderPath: input.folderPath,
     folderName: input.folderName,
     collaborator: typeof input.collaborator === 'string' ? input.collaborator : null,
+    lastSyncedChangeId: typeof input.lastSyncedChangeId === 'number' ? input.lastSyncedChangeId : 0,
   });
 
   void registerConnectionWatcher(connection);
@@ -274,6 +281,11 @@ ipcMain.handle('secure-drive:replace-file-metadata', async (_event, connectionId
       deleted: Boolean(file.deleted),
     })),
   );
+});
+
+ipcMain.handle('secure-drive:sync-now', async () => {
+  await syncAllConnections();
+  return true;
 });
 
 // This method will be called when Electron has finished

@@ -12,18 +12,22 @@ type FolderEntry = {
 type SyncConnection = {
 	id: number;
 	ownerUserId: number;
+	remoteConnectionId: number | null;
 	folderPath: string;
 	folderName: string;
 	collaborator: string | null;
+	lastSyncedChangeId: number;
 	createdAt: string;
 	updatedAt: string;
 };
 
 type SyncConnectionInput = {
 	ownerUserId: number;
+	remoteConnectionId?: number | null;
 	folderPath: string;
 	folderName: string;
 	collaborator: string | null;
+	lastSyncedChangeId?: number;
 };
 
 type FileMetadata = {
@@ -65,4 +69,5 @@ contextBridge.exposeInMainWorld('secureDrive', {
 		ipcRenderer.invoke('secure-drive:upsert-file-metadata', connectionId, input),
 	replaceFileMetadata: (connectionId: number, files: FileMetadataInput[]): Promise<FileMetadata[]> =>
 		ipcRenderer.invoke('secure-drive:replace-file-metadata', connectionId, files),
+	syncNow: (): Promise<boolean> => ipcRenderer.invoke('secure-drive:sync-now'),
 });
