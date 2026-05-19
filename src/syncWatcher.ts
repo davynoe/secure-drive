@@ -8,7 +8,8 @@ import { pullRemoteChanges, syncConnectionToBackend } from './backendSync';
 import { getSyncConnectionById, syncFileMetadataSnapshot, type FileMetadataInput, type SyncConnection } from './syncStore';
 
 const execFileAsync = promisify(execFile);
-const malwareScannerPath = path.join(app.getAppPath(), 'malware_scanner');
+const malwareScannerName = process.platform === 'win32' ? 'malware_scanner.exe' : 'malware_scanner';
+const malwareScannerPath = path.join(app.getAppPath(), malwareScannerName);
 
 type ConnectionWatchState = {
   connection: SyncConnection;
