@@ -1,7 +1,15 @@
-import { useEffect, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 const SELECTED_FOLDER_KEY = 'secure-drive-selected-folder';
+const USER_KEY = 'secure-drive-user';
+
+type StoredUser = {
+  id: number;
+  name: string;
+  handle: string;
+  email: string;
+};
 
 type FolderEntry = {
   name: string;
@@ -21,6 +29,29 @@ type FolderTreeNode = FolderEntry & {
 type LocationState = {
   folderPath?: string;
 };
+
+function readStoredUser(): StoredUser | null {
+  try {
+    const raw = localStorage.getItem(USER_KEY);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<StoredUser>;
+    if (
+      typeof parsed.id !== 'number' ||
+      typeof parsed.name !== 'string' ||
+      typeof parsed.handle !== 'string' ||
+      typeof parsed.email !== 'string'
+    ) {
+      return null;
+    }
+
+    return parsed as StoredUser;
+  } catch {
+    return null;
+  }
+}
 
 function formatSize(value: number | null): string {
   if (value === null) return '-';
@@ -64,6 +95,34 @@ function FileIcon() {
       />
     </svg>
   );
+}
+
+function WarningIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 text-rose-400">
+      <path
+        fill="currentColor"
+        d="M12 2.25c.45 0 .87.24 1.1.63l8.4 14.1c.23.39.23.87 0 1.26-.23.39-.65.63-1.1.63H3.6c-.45 0-.87-.24-1.1-.63-.23-.39-.23-.87 0-1.26l8.4-14.1c.23-.39.65-.63 1.1-.63Zm0 5.25a.75.75 0 0 0-.75.75v5.5a.75.75 0 0 0 1.5 0v-5.5A.75.75 0 0 0 12 7.5Zm0 9.25a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z"
+      />
+    </svg>
+  );
+}
+
+function normalizePath(value: string): string {
+  return value.replace(/\\/g, '/');
+}
+
+function getRelativePath(fullPath: string, basePath: string): string {
+  const normalizedFull = normalizePath(fullPath);
+  const normalizedBase = normalizePath(basePath).replace(/\/+$/, '');
+  if (!normalizedBase) {
+    return normalizedFull;
+  }
+  if (normalizedFull === normalizedBase) {
+    return '';
+  }
+  const prefix = `${normalizedBase}/`;
+  return normalizedFull.startsWith(prefix) ? normalizedFull.slice(prefix.length) : normalizedFull;
 }
 
 function toTreeNodes(items: FolderEntry[]): FolderTreeNode[] {
@@ -124,6 +183,7 @@ export default function FolderContentsPage() {
   const [entries, setEntries] = useState<FolderTreeNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [virusPaths, setVirusPaths] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     const selectedFromRoute = locationState?.folderPath ?? '';
@@ -176,6 +236,52 @@ export default function FolderContentsPage() {
     };
 
     void loadFolder();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [folderPath]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadVirusFlags = async () => {
+      if (!folderPath) {
+        setVirusPaths(new Set());
+        return;
+      }
+
+      const user = readStoredUser();
+      if (!user) {
+        setVirusPaths(new Set());
+        return;
+      }
+
+      try {
+        const connections = await window.secureDrive.listSyncConnections(user.id);
+        const connection = connections.find((item) => item.folderPath === folderPath);
+        if (!connection) {
+          setVirusPaths(new Set());
+          return;
+        }
+
+        const files = await window.secureDrive.listFileMetadata(connection.id);
+        if (!isMounted) return;
+
+        const flagged = new Set(
+          files
+            .filter((file) => file.isVirus && !file.deleted)
+            .map((file) => file.relativePath),
+        );
+        setVirusPaths(flagged);
+      } catch {
+        if (isMounted) {
+          setVirusPaths(new Set());
+        }
+      }
+    };
+
+    void loadVirusFlags();
 
     return () => {
       isMounted = false;
@@ -241,6 +347,8 @@ export default function FolderContentsPage() {
 
   const renderTreeNodes = (nodes: FolderTreeNode[], depth = 0): ReactElement[] => {
     return nodes.flatMap((node) => {
+      const relativePath = node.kind === 'file' ? getRelativePath(node.path, folderPath) : '';
+      const isVirus = node.kind === 'file' && virusPaths.has(relativePath);
       const row = (
         <div
           key={node.path}
@@ -262,6 +370,11 @@ export default function FolderContentsPage() {
               <>
                 <span className="w-4 text-center text-slate-500">-</span>
                 <FileIcon />
+                {isVirus ? (
+                  <span className="flex items-center text-rose-300" title="Virus detected" aria-label="Virus detected">
+                    <WarningIcon />
+                  </span>
+                ) : null}
                 <span className="truncate">{node.name}</span>
               </>
             )}

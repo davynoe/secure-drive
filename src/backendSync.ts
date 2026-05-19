@@ -231,6 +231,10 @@ async function pushLocalSnapshot(connection: SyncConnection, apiBaseUrl: string)
 	const files = listFileMetadata(connection.id);
 
 	for (const file of files) {
+		if (file.isVirus) {
+			continue;
+		}
+
 		if (file.deleted) {
 			await postJson(`${apiBaseUrl}/sync/${connection.remoteConnectionId}/file`, {
 				actorUserId: connection.ownerUserId,
