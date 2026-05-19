@@ -34,7 +34,7 @@ async function collectDirectorySnapshot(folderPath: string): Promise<FileMetadat
     }
 
     try {
-      const result = await execFileAsync(malwareScannerPath, [fullPath, '--exit-code']);
+      const result = await execFileAsync(malwareScannerPath, [fullPath, '--raw']);
       // Parse stdout output - scanner outputs "0" or "1"
       const output = result.stdout?.toString().trim() ?? '0';
       return output === '1';
