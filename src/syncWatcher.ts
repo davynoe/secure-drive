@@ -34,10 +34,17 @@ async function collectDirectorySnapshot(folderPath: string): Promise<FileMetadat
     }
 
     try {
-      await execFileAsync(malwareScannerPath, [fullPath, '--exit-code']);
-      return false;
+      const result = await execFileAsync(malwareScannerPath, [fullPath, '--exit-code']);
+      // Parse stdout output - scanner outputs "0" or "1"
+      const output = result.stdout?.toString().trim() ?? '0';
+      return output === '1';
     } catch (error: any) {
-      return error?.code === 1;
+      // Check stdout even on error
+      if (error?.stdout) {
+        const output = error.stdout.toString().trim();
+        return output === '1';
+      }
+      return false;
     }
   }
 
