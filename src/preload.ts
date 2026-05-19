@@ -39,6 +39,7 @@ type FileMetadata = {
 	lastModified: number;
 	contentHash: string | null;
 	isDirectory: boolean;
+	isVirus: boolean;
 	deleted: boolean;
 	createdAt: string;
 	updatedAt: string;
@@ -51,6 +52,7 @@ type FileMetadataInput = {
 	lastModified: number;
 	contentHash?: string | null;
 	isDirectory?: boolean;
+	isVirus?: boolean;
 	deleted?: boolean;
 };
 

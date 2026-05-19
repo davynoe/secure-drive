@@ -38,6 +38,7 @@ function createDatabaseConnection() {
       last_modified INTEGER NOT NULL,
       content_hash TEXT,
       is_directory INTEGER NOT NULL DEFAULT 0,
+      is_virus INTEGER NOT NULL DEFAULT 0,
       deleted INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

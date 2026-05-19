@@ -1,8 +1,14 @@
+import { app } from 'electron';
+import { execFile } from 'node:child_process';
 import { watch, type FSWatcher } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { pullRemoteChanges, syncConnectionToBackend } from './backendSync';
 import { getSyncConnectionById, syncFileMetadataSnapshot, type FileMetadataInput, type SyncConnection } from './syncStore';
+
+const execFileAsync = promisify(execFile);
+const malwareScannerPath = path.join(app.getAppPath(), 'malware_scanner');
 
 type ConnectionWatchState = {
   connection: SyncConnection;
@@ -21,6 +27,19 @@ const CONNECTION_POLL_INTERVAL_MS = 3000;
 async function collectDirectorySnapshot(folderPath: string): Promise<FileMetadataInput[]> {
   const results: FileMetadataInput[] = [];
 
+  async function scanForVirus(fullPath: string, isExecutable: boolean): Promise<boolean> {
+    if (!isExecutable) {
+      return false;
+    }
+
+    try {
+      await execFileAsync(malwareScannerPath, [fullPath, '--exit-code']);
+      return false;
+    } catch (error: any) {
+      return error?.code === 1;
+    }
+  }
+
   const visitDirectory = async (currentPath: string) => {
     const entries = await fs.readdir(currentPath, { withFileTypes: true });
 
@@ -36,12 +55,14 @@ async function collectDirectorySnapshot(folderPath: string): Promise<FileMetadat
       }
 
       const isDirectory = entry.isDirectory();
+      const isVirus = await scanForVirus(fullPath, !isDirectory && path.extname(entry.name).toLowerCase() === '.exe');
       results.push({
         filename: entry.name,
         relativePath,
         size: isDirectory ? null : stats.size,
         lastModified: Math.floor(stats.mtimeMs),
         isDirectory,
+        isVirus,
         deleted: false,
       });
 
