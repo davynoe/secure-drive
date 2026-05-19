@@ -64,6 +64,9 @@ interface Window {
 		listFileMetadata: (connectionId: number) => Promise<FileMetadata[]>;
 		upsertFileMetadata: (connectionId: number, input: FileMetadataInput) => Promise<FileMetadata | null>;
 		replaceFileMetadata: (connectionId: number, files: FileMetadataInput[]) => Promise<FileMetadata[]>;
+		deleteFile: (filePath: string) => Promise<boolean>;
+		deleteSyncConnection: (connectionId: number) => Promise<boolean>;
+		listScanningPaths: () => Promise<string[]>;
 		syncNow: () => Promise<boolean>;
 	};
 }

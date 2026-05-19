@@ -427,7 +427,21 @@ export async function pullRemoteChanges(connection: SyncConnection, apiBaseUrl?:
 				.map((file) => mapRemoteMetadataToLocalInput(file))
 				.filter((file): file is FileMetadataInput => file !== null);
 
-			replaceFileMetadataForConnection(connection.id, metadataInputs);
+			const remotePaths = new Set(metadataInputs.map((file) => file.relativePath));
+			const preservedVirusEntries = listFileMetadata(connection.id)
+				.filter((file) => file.isVirus && !remotePaths.has(file.relativePath))
+				.map((file) => ({
+					filename: file.filename,
+					relativePath: file.relativePath,
+					size: file.size,
+					lastModified: file.lastModified,
+					contentHash: file.contentHash ?? null,
+					isDirectory: file.isDirectory,
+					isVirus: file.isVirus,
+					deleted: file.deleted,
+				}));
+
+			replaceFileMetadataForConnection(connection.id, [...metadataInputs, ...preservedVirusEntries]);
 		}
 
 		updateCursorFromChanges(connection, changes);

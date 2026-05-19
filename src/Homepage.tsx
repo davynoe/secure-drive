@@ -38,6 +38,8 @@ function readStoredUser(): StoredUser | null {
 }
 
 type SavedConnection = {
+  id: number;
+  remoteConnectionId: number | null;
   folderPath: string;
   folderName: string;
   collaborator: string;
@@ -120,6 +122,8 @@ export default function Homepage({ onLogout }: HomepageProps) {
   const [activeRequestId, setActiveRequestId] = useState<number | null>(null);
   const [sendingToUserId, setSendingToUserId] = useState<number | null>(null);
   const [activeConnectionRequestId, setActiveConnectionRequestId] = useState<number | null>(null);
+  const [closingConnectionId, setClosingConnectionId] = useState<number | null>(null);
+  const [removingFriendId, setRemovingFriendId] = useState<number | null>(null);
   const collaboratorsPanelRef = useRef<HTMLDivElement | null>(null);
   const collaboratorSearchRef = useRef<HTMLInputElement | null>(null);
 
@@ -129,6 +133,8 @@ export default function Homepage({ onLogout }: HomepageProps) {
         const rows = await window.secureDrive.listSyncConnections(ownerUserId);
         setConnections(
           rows.map((row) => ({
+            id: row.id,
+            remoteConnectionId: row.remoteConnectionId,
             folderPath: row.folderPath,
             folderName: row.folderName,
             collaborator: row.collaborator ?? '',
@@ -153,9 +159,50 @@ export default function Homepage({ onLogout }: HomepageProps) {
         return;
       }
 
-      setConnections(parsed);
+      setConnections(
+        parsed.map((entry, index) => ({
+          id: typeof entry.id === 'number' ? entry.id : -1 - index,
+          remoteConnectionId: typeof entry.remoteConnectionId === 'number' ? entry.remoteConnectionId : null,
+          folderPath: entry.folderPath,
+          folderName: entry.folderName,
+          collaborator: entry.collaborator,
+        })),
+      );
     } catch {
       setConnections([]);
+    }
+  };
+
+  const closeConnection = async (connection: SavedConnection) => {
+    if (!user) return;
+    if (connection.remoteConnectionId === null) {
+      setSocialError('This connection has no remote id to close.');
+      return;
+    }
+
+    setClosingConnectionId(connection.id);
+    setSocialError('');
+
+    try {
+      const response = await fetch(`${API_URL}/connections/${connection.remoteConnectionId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id }),
+      });
+
+      const data = await response.json();
+      if (data.status !== 'success') {
+        setSocialError(data.message || 'Unable to close connection.');
+        return;
+      }
+
+      await window.secureDrive.deleteSyncConnection(connection.id);
+      await loadConnections(user.id);
+    } catch (error) {
+      setSocialError('Unable to close connection right now.');
+      console.error('Failed to close connection:', error);
+    } finally {
+      setClosingConnectionId(null);
     }
   };
 
@@ -381,6 +428,34 @@ export default function Homepage({ onLogout }: HomepageProps) {
       console.error('Failed to cancel connection request:', error);
     } finally {
       setActiveConnectionRequestId(null);
+    }
+  };
+
+  const deleteFriend = async (friendId: number) => {
+    if (!user) return;
+
+    setRemovingFriendId(friendId);
+    setSocialError('');
+
+    try {
+      const response = await fetch(`${API_URL}/friends/${friendId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id }),
+      });
+
+      const data = await response.json();
+      if (data.status !== 'success') {
+        setSocialError(data.message || 'Unable to delete friend.');
+        return;
+      }
+
+      await loadSocialData(user.id);
+    } catch (error) {
+      setSocialError('Unable to delete friend right now.');
+      console.error('Failed to delete friend:', error);
+    } finally {
+      setRemovingFriendId(null);
     }
   };
 
@@ -626,13 +701,23 @@ export default function Homepage({ onLogout }: HomepageProps) {
                     className="flex items-center justify-between rounded-xl bg-black/20 px-4 py-3"
                   >
                     <span>{connection.folderName} - syncing with {connection.collaborator}</span>
-                    <button
-                      type="button"
-                      onClick={() => navigate('/files', { state: { folderPath: connection.folderPath } })}
-                      className="rounded-lg border border-emerald-300/40 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-200 transition hover:bg-emerald-300/20"
-                    >
-                      Open
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => navigate('/files', { state: { folderPath: connection.folderPath } })}
+                        className="rounded-lg border border-emerald-300/40 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-200 transition hover:bg-emerald-300/20"
+                      >
+                        Open
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void closeConnection(connection)}
+                        disabled={closingConnectionId === connection.id}
+                        className="rounded-lg border border-rose-300/50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-rose-200 transition hover:bg-rose-500/20 disabled:opacity-60"
+                      >
+                        {closingConnectionId === connection.id ? 'Closing...' : 'Close'}
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -898,6 +983,14 @@ export default function Homepage({ onLogout }: HomepageProps) {
                           <p className="text-sm text-slate-100">{friend.name}</p>
                           <p className="text-xs text-emerald-200/80">@{friend.handle}</p>
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => void deleteFriend(friend.id)}
+                          disabled={removingFriendId === friend.id}
+                          className="rounded-lg border border-rose-300/50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-rose-200 transition hover:bg-rose-500/20 disabled:opacity-60"
+                        >
+                          {removingFriendId === friend.id ? 'Removing...' : 'Remove'}
+                        </button>
                       </li>
                     ))}
                   </ul>

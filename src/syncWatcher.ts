@@ -10,6 +10,12 @@ import { getSyncConnectionById, syncFileMetadataSnapshot, type FileMetadataInput
 const execFileAsync = promisify(execFile);
 const malwareScannerName = process.platform === 'win32' ? 'malware_scanner.exe' : 'malware_scanner';
 const malwareScannerPath = path.join(app.getAppPath(), malwareScannerName);
+const scanningPaths = new Set<string>();
+const scanCache = new Map<string, { lastModified: number; isVirus: boolean }>();
+
+function normalizeScanPath(value: string): string {
+  return value.replace(/\\/g, '/');
+}
 
 type ConnectionWatchState = {
   connection: SyncConnection;
@@ -33,19 +39,26 @@ async function collectDirectorySnapshot(folderPath: string): Promise<FileMetadat
       return false;
     }
 
+    const normalizedPath = normalizeScanPath(fullPath);
+    scanningPaths.add(normalizedPath);
+    let isVirus = false;
+
     try {
       const result = await execFileAsync(malwareScannerPath, [fullPath, '--raw']);
       // Parse stdout output - scanner outputs "0" or "1"
       const output = result.stdout?.toString().trim() ?? '0';
-      return output === '1';
+      isVirus = output === '1';
     } catch (error: any) {
       // Check stdout even on error
       if (error?.stdout) {
         const output = error.stdout.toString().trim();
-        return output === '1';
+        isVirus = output === '1';
       }
-      return false;
+    } finally {
+      scanningPaths.delete(normalizedPath);
     }
+
+    return isVirus;
   }
 
   const visitDirectory = async (currentPath: string) => {
@@ -63,7 +76,18 @@ async function collectDirectorySnapshot(folderPath: string): Promise<FileMetadat
       }
 
       const isDirectory = entry.isDirectory();
-      const isVirus = await scanForVirus(fullPath, !isDirectory && path.extname(entry.name).toLowerCase() === '.exe');
+      const shouldScan = !isDirectory && path.extname(entry.name).toLowerCase() === '.exe';
+      const normalizedPath = normalizeScanPath(fullPath);
+      const cached = scanCache.get(normalizedPath);
+      const isVirus = shouldScan
+        ? cached && cached.lastModified === Math.floor(stats.mtimeMs)
+          ? cached.isVirus
+          : await scanForVirus(fullPath, true)
+        : false;
+
+      if (shouldScan) {
+        scanCache.set(normalizedPath, { lastModified: Math.floor(stats.mtimeMs), isVirus });
+      }
       results.push({
         filename: entry.name,
         relativePath,
@@ -93,6 +117,10 @@ function clearConnectionWatchers(connectionId: number): void {
   stopConnectionPolling(state);
   closeStateWatchers(state);
   connectionWatchStates.delete(connectionId);
+}
+
+export function stopConnectionWatcher(connectionId: number): void {
+  clearConnectionWatchers(connectionId);
 }
 
 function closeStateWatchers(state: ConnectionWatchState): void {
@@ -299,6 +327,10 @@ export function stopAllSyncWatchers(): void {
   for (const connectionId of connectionWatchStates.keys()) {
     clearConnectionWatchers(connectionId);
   }
+}
+
+export function listScanningPaths(): string[] {
+  return Array.from(scanningPaths.values());
 }
 
 export async function runWithConnectionRefreshSuppressed<T>(

@@ -347,6 +347,13 @@ export function listAllSyncConnections(): SyncConnection[] {
   return rows.map(mapSyncConnection);
 }
 
+export function deleteSyncConnection(connectionId: number): boolean {
+  const db = getDatabase();
+  const stmt = db.prepare('DELETE FROM sync_connections WHERE id = ?');
+  const result = stmt.run(connectionId);
+  return result.changes > 0;
+}
+
 export function getSyncConnectionById(connectionId: number): SyncConnection | null {
   const db = getDatabase();
   const stmt = db.prepare(

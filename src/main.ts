@@ -6,12 +6,13 @@ import {
   listFileMetadata,
   listAllSyncConnections,
   listSyncConnections,
+  deleteSyncConnection,
   replaceFileMetadataForConnection,
   upsertFileMetadata,
   upsertSyncConnection,
 } from './syncStore';
 import { syncAllConnections } from './backendSync';
-import { initializeSyncWatchers, registerConnectionWatcher, stopAllSyncWatchers } from './syncWatcher';
+import { initializeSyncWatchers, listScanningPaths, registerConnectionWatcher, stopAllSyncWatchers, stopConnectionWatcher } from './syncWatcher';
 
 declare const __API_BASE_URL__: string;
 
@@ -205,6 +206,21 @@ ipcMain.handle('secure-drive:list-folder', async (_event, folderPath: string): P
   });
 });
 
+ipcMain.handle('secure-drive:list-scanning-paths', async () => listScanningPaths());
+
+ipcMain.handle('secure-drive:delete-file', async (_event, filePath: string) => {
+  if (!filePath || typeof filePath !== 'string') {
+    return false;
+  }
+
+  try {
+    await fs.rm(filePath, { force: true });
+    return true;
+  } catch {
+    return false;
+  }
+});
+
 ipcMain.handle('secure-drive:list-sync-connections', async (_event, ownerUserId: number) => {
   if (typeof ownerUserId !== 'number' || Number.isNaN(ownerUserId)) {
     return [];
@@ -284,6 +300,15 @@ ipcMain.handle('secure-drive:replace-file-metadata', async (_event, connectionId
       deleted: Boolean(file.deleted),
     })),
   );
+});
+
+ipcMain.handle('secure-drive:delete-sync-connection', async (_event, connectionId: number) => {
+  if (typeof connectionId !== 'number' || Number.isNaN(connectionId)) {
+    return false;
+  }
+
+  stopConnectionWatcher(connectionId);
+  return deleteSyncConnection(connectionId);
 });
 
 ipcMain.handle('secure-drive:sync-now', async () => {

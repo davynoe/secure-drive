@@ -108,6 +108,17 @@ function WarningIcon() {
   );
 }
 
+function ScanningIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 animate-spin text-amber-300">
+      <path
+        fill="currentColor"
+        d="M12 2a10 10 0 1 0 7.07 2.93l-1.42 1.42A8 8 0 1 1 12 4v2.5l3.5-3.5L12 0.5V2Z"
+      />
+    </svg>
+  );
+}
+
 function normalizePath(value: string): string {
   return value.replace(/\\/g, '/');
 }
@@ -123,6 +134,18 @@ function getRelativePath(fullPath: string, basePath: string): string {
   }
   const prefix = `${normalizedBase}/`;
   return normalizedFull.startsWith(prefix) ? normalizedFull.slice(prefix.length) : normalizedFull;
+}
+
+function joinPaths(basePath: string, relativePath: string): string {
+  const normalizedBase = normalizePath(basePath).replace(/\/+$/, '');
+  const normalizedRelative = normalizePath(relativePath).replace(/^\/+/, '');
+  if (!normalizedBase) {
+    return normalizedRelative;
+  }
+  if (!normalizedRelative) {
+    return normalizedBase;
+  }
+  return `${normalizedBase}/${normalizedRelative}`;
 }
 
 function toTreeNodes(items: FolderEntry[]): FolderTreeNode[] {
@@ -157,6 +180,21 @@ function updateNodeByPath(
   });
 }
 
+function removeNodeByPath(nodes: FolderTreeNode[], targetPath: string): FolderTreeNode[] {
+  return nodes
+    .filter((node) => node.path !== targetPath)
+    .map((node) => {
+      if (!node.children) {
+        return node;
+      }
+
+      return {
+        ...node,
+        children: removeNodeByPath(node.children, targetPath),
+      };
+    });
+}
+
 function findNodeByPath(nodes: FolderTreeNode[], targetPath: string): FolderTreeNode | null {
   for (const node of nodes) {
     if (node.path === targetPath) {
@@ -184,6 +222,7 @@ export default function FolderContentsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [virusPaths, setVirusPaths] = useState<Set<string>>(() => new Set());
+  const [scanningPaths, setScanningPaths] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     const selectedFromRoute = locationState?.folderPath ?? '';
@@ -244,6 +283,47 @@ export default function FolderContentsPage() {
 
   useEffect(() => {
     let isMounted = true;
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    const refreshScanning = async () => {
+      if (!folderPath) {
+        setScanningPaths(new Set());
+        return;
+      }
+
+      try {
+        const paths = await window.secureDrive.listScanningPaths();
+        if (!isMounted) return;
+
+        const normalizedFolderPath = normalizePath(folderPath).replace(/\/+$/, '');
+        const filtered = new Set(
+          paths
+            .map((item) => normalizePath(item))
+            .filter((fullPath) =>
+              normalizedFolderPath === fullPath || fullPath.startsWith(`${normalizedFolderPath}/`)
+            ),
+        );
+        setScanningPaths(filtered);
+      } catch {
+        if (isMounted) {
+          setScanningPaths(new Set());
+        }
+      }
+    };
+
+    void refreshScanning();
+    interval = setInterval(() => void refreshScanning(), 1000);
+
+    return () => {
+      isMounted = false;
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [folderPath]);
+
+  useEffect(() => {
+    let isMounted = true;
 
     const loadVirusFlags = async () => {
       if (!folderPath) {
@@ -259,7 +339,16 @@ export default function FolderContentsPage() {
 
       try {
         const connections = await window.secureDrive.listSyncConnections(user.id);
-        const connection = connections.find((item) => item.folderPath === folderPath);
+        const normalizedFolderPath = normalizePath(folderPath).replace(/\/+$/, '');
+        const connection = connections
+          .map((item) => ({
+            item,
+            normalized: normalizePath(item.folderPath).replace(/\/+$/, ''),
+          }))
+          .filter(({ normalized }) =>
+            normalizedFolderPath === normalized || normalizedFolderPath.startsWith(`${normalized}/`)
+          )
+          .sort((a, b) => b.normalized.length - a.normalized.length)[0]?.item;
         if (!connection) {
           setVirusPaths(new Set());
           return;
@@ -268,10 +357,15 @@ export default function FolderContentsPage() {
         const files = await window.secureDrive.listFileMetadata(connection.id);
         if (!isMounted) return;
 
+        const connectionBase = normalizePath(connection.folderPath).replace(/\/+$/, '');
         const flagged = new Set(
           files
             .filter((file) => file.isVirus && !file.deleted)
-            .map((file) => file.relativePath),
+            .map((file) => joinPaths(connectionBase, file.relativePath))
+            .filter((fullPath) =>
+              normalizedFolderPath === fullPath || fullPath.startsWith(`${normalizedFolderPath}/`)
+            )
+            .map((fullPath) => getRelativePath(fullPath, normalizedFolderPath)),
         );
         setVirusPaths(flagged);
       } catch {
@@ -345,10 +439,33 @@ export default function FolderContentsPage() {
     }
   };
 
+  const handleRemoveFile = async (nodePath: string, relativePath: string) => {
+    setError('');
+    try {
+      const removed = await window.secureDrive.deleteFile(nodePath);
+      if (!removed) {
+        setError('Could not remove the file.');
+        return;
+      }
+
+      setEntries((prev) => removeNodeByPath(prev, nodePath));
+      setVirusPaths((prev) => {
+        const next = new Set(prev);
+        next.delete(relativePath);
+        return next;
+      });
+    } catch {
+      setError('Could not remove the file.');
+    }
+  };
+
   const renderTreeNodes = (nodes: FolderTreeNode[], depth = 0): ReactElement[] => {
     return nodes.flatMap((node) => {
       const relativePath = node.kind === 'file' ? getRelativePath(node.path, folderPath) : '';
       const isVirus = node.kind === 'file' && virusPaths.has(relativePath);
+      const normalizedNodePath = normalizePath(node.path);
+      const isExecutable = node.kind === 'file' && node.name.toLowerCase().endsWith('.exe');
+      const isScanning = isExecutable && scanningPaths.has(normalizedNodePath);
       const row = (
         <div
           key={node.path}
@@ -370,7 +487,11 @@ export default function FolderContentsPage() {
               <>
                 <span className="w-4 text-center text-slate-500">-</span>
                 <FileIcon />
-                {isVirus ? (
+                {isScanning ? (
+                  <span className="flex items-center text-amber-300" title="Scanning" aria-label="Scanning">
+                    <ScanningIcon />
+                  </span>
+                ) : isVirus ? (
                   <span className="flex items-center text-rose-300" title="Virus detected" aria-label="Virus detected">
                     <WarningIcon />
                   </span>
@@ -379,7 +500,16 @@ export default function FolderContentsPage() {
               </>
             )}
           </div>
-          <div className="ml-4 flex shrink-0 items-center gap-6 text-xs text-slate-400">
+          <div className="ml-4 flex shrink-0 items-center gap-4 text-xs text-slate-400">
+            {isVirus ? (
+              <button
+                type="button"
+                onClick={() => void handleRemoveFile(node.path, relativePath)}
+                className="rounded-md border border-rose-400/40 bg-rose-500/10 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-rose-200 transition hover:bg-rose-500/20"
+              >
+                Remove file
+              </button>
+            ) : null}
             <span>{node.kind === 'file' ? formatSize(node.size) : '-'}</span>
             <span>Updated: {node.lastUpdated}</span>
           </div>

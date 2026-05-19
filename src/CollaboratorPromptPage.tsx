@@ -80,10 +80,17 @@ export default function CollaboratorPromptPage() {
   const [loading, setLoading] = useState(false);
   const [sendingToUserId, setSendingToUserId] = useState<number | null>(null);
   const [initialBaseChoice, setInitialBaseChoice] = useState<InitialBaseChoice>('user');
+  const [requestTitle, setRequestTitle] = useState('');
+  const [requestDescription, setRequestDescription] = useState('');
   const [error, setError] = useState('');
 
   const folderPath = locationState?.folderPath ?? '';
   const folderName = useMemo(() => getFolderName(folderPath), [folderPath]);
+
+  useEffect(() => {
+    setRequestTitle(folderName);
+    setRequestDescription(folderPath);
+  }, [folderName, folderPath]);
 
   useEffect(() => {
     const currentUser = readStoredUser();
@@ -143,8 +150,8 @@ export default function CollaboratorPromptPage() {
         body: JSON.stringify({
           requesterId: currentUser.id,
           receiverId: collaborator.id,
-          title: folderName,
-          description: folderPath,
+          title: requestTitle.trim() || folderName,
+          description: requestDescription.trim() || folderPath,
           initialBaseId: initialBaseChoice === 'user' ? currentUser.id : collaborator.id,
         }),
       });
@@ -212,6 +219,33 @@ export default function CollaboratorPromptPage() {
           </section>
         ) : (
           <section className="rounded-2xl border border-white/10 bg-white/5 p-6">
+            <fieldset className="rounded-xl border border-white/10 bg-black/20 p-4">
+              <legend className="px-1 text-sm font-medium text-slate-200">Request details</legend>
+              <p className="mt-1 text-xs text-slate-400">Customize the title and description sent to your collaborator.</p>
+
+              <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                Title
+                <input
+                  type="text"
+                  value={requestTitle}
+                  onChange={(event) => setRequestTitle(event.target.value)}
+                  placeholder={folderName}
+                  className="mt-2 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-300/70 focus:outline-none"
+                />
+              </label>
+
+              <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                Description
+                <textarea
+                  value={requestDescription}
+                  onChange={(event) => setRequestDescription(event.target.value)}
+                  placeholder={folderPath}
+                  rows={3}
+                  className="mt-2 w-full resize-none rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-300/70 focus:outline-none"
+                />
+              </label>
+            </fieldset>
+
             <fieldset className="rounded-xl border border-white/10 bg-black/20 p-4">
               <legend className="px-1 text-sm font-medium text-slate-200">Initial base</legend>
               <p className="mt-1 text-xs text-slate-400">Choose who starts with the base folder for this connection request.</p>

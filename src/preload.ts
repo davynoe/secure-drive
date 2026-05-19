@@ -71,5 +71,9 @@ contextBridge.exposeInMainWorld('secureDrive', {
 		ipcRenderer.invoke('secure-drive:upsert-file-metadata', connectionId, input),
 	replaceFileMetadata: (connectionId: number, files: FileMetadataInput[]): Promise<FileMetadata[]> =>
 		ipcRenderer.invoke('secure-drive:replace-file-metadata', connectionId, files),
+	deleteFile: (filePath: string): Promise<boolean> => ipcRenderer.invoke('secure-drive:delete-file', filePath),
+	deleteSyncConnection: (connectionId: number): Promise<boolean> =>
+		ipcRenderer.invoke('secure-drive:delete-sync-connection', connectionId),
+	listScanningPaths: (): Promise<string[]> => ipcRenderer.invoke('secure-drive:list-scanning-paths'),
 	syncNow: (): Promise<boolean> => ipcRenderer.invoke('secure-drive:sync-now'),
 });
