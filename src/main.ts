@@ -99,6 +99,11 @@ const createWindow = () => {
     },
   });
 
+  // Hide the default application menu bar (File/Edit/View) on Windows/Linux.
+  mainWindow.setMenuBarVisibility(false);
+  mainWindow.setAutoHideMenuBar(true);
+  Menu.setApplicationMenu(null);
+
   mainWindow.on('close', (event) => {
     if (isQuitting) {
       return;

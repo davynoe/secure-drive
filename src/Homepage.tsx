@@ -104,6 +104,15 @@ type ConnectionAcceptanceResponse = {
   };
 };
 
+type ServerEvent = {
+  event: string;
+  data?: unknown;
+};
+
+type ConnectionDeletedPayload = {
+  connectionId?: number;
+};
+
 type HomepageProps = {
   onLogout: () => void;
 };
@@ -126,6 +135,31 @@ export default function Homepage({ onLogout }: HomepageProps) {
   const [removingFriendId, setRemovingFriendId] = useState<number | null>(null);
   const collaboratorsPanelRef = useRef<HTMLDivElement | null>(null);
   const collaboratorSearchRef = useRef<HTMLInputElement | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
+
+  const getWebSocketUrl = (apiUrl: string): string => {
+    if (!apiUrl) return '';
+    if (apiUrl.startsWith('https://')) return apiUrl.replace(/^https:\/\//, 'wss://');
+    if (apiUrl.startsWith('http://')) return apiUrl.replace(/^http:\/\//, 'ws://');
+    return apiUrl;
+  };
+
+  const handleRemoteConnectionDeleted = async (connectionId: number) => {
+    if (!user) return;
+
+    try {
+      const syncConnections = await window.secureDrive.listSyncConnections(user.id);
+      const matching = syncConnections.find((connection) => connection.remoteConnectionId === connectionId);
+      if (matching) {
+        await window.secureDrive.deleteSyncConnection(matching.id);
+      }
+
+      await loadConnections(user.id);
+      await loadSocialData(user.id);
+    } catch (error) {
+      console.error('Failed to remove local connection:', error);
+    }
+  };
 
   const loadConnections = async (ownerUserId?: number) => {
     if (ownerUserId) {
@@ -647,6 +681,99 @@ export default function Homepage({ onLogout }: HomepageProps) {
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, []);
+
+  useEffect(() => {
+    if (!user) {
+      if (socketRef.current) {
+        socketRef.current.close();
+        socketRef.current = null;
+      }
+      return;
+    }
+
+    let disposed = false;
+    let reconnectTimer: number | null = null;
+    const wsUrl = getWebSocketUrl(API_URL);
+
+    const cleanupSocket = () => {
+      if (socketRef.current) {
+        socketRef.current.close();
+        socketRef.current = null;
+      }
+    };
+
+    const scheduleReconnect = () => {
+      if (disposed) return;
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+      }
+      reconnectTimer = window.setTimeout(connectSocket, 1500);
+    };
+
+    const connectSocket = () => {
+      if (disposed || !wsUrl) return;
+
+      const socket = new WebSocket(wsUrl);
+      socketRef.current = socket;
+
+      socket.addEventListener('open', () => {
+        socket.send(JSON.stringify({ type: 'auth', userId: user.id }));
+      });
+
+      socket.addEventListener('message', (event) => {
+        try {
+          const payload = JSON.parse(String(event.data)) as ServerEvent;
+          if (!payload?.event) return;
+
+          switch (payload.event) {
+            case 'friendRequest:new':
+            case 'friendRequest:accepted':
+            case 'friendRequest:rejected':
+            case 'friendRequest:canceled':
+            case 'connectionRequest:new':
+            case 'connectionRequest:accepted':
+            case 'connectionRequest:rejected':
+            case 'connectionRequest:canceled':
+              void loadSocialData(user.id);
+              break;
+            case 'connection:deleted': {
+              const data = (payload.data ?? {}) as ConnectionDeletedPayload;
+              if (typeof data.connectionId === 'number') {
+                void handleRemoteConnectionDeleted(data.connectionId);
+              }
+              break;
+            }
+            default:
+              break;
+          }
+        } catch {
+          // Ignore malformed messages.
+        }
+      });
+
+      socket.addEventListener('close', () => {
+        if (!disposed) {
+          scheduleReconnect();
+        }
+      });
+
+      socket.addEventListener('error', () => {
+        if (!disposed) {
+          scheduleReconnect();
+        }
+      });
+    };
+
+    connectSocket();
+
+    return () => {
+      disposed = true;
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+      }
+      cleanupSocket();
+    };
+  }, [user]);
 
   const handlePickFolder = async () => {
     try {
