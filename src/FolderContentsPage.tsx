@@ -220,6 +220,7 @@ export default function FolderContentsPage() {
   const [folderPath, setFolderPath] = useState('');
   const [entries, setEntries] = useState<FolderTreeNode[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [virusPaths, setVirusPaths] = useState<Set<string>>(() => new Set());
   const [scanningPaths, setScanningPaths] = useState<Set<string>>(() => new Set());
@@ -280,6 +281,25 @@ export default function FolderContentsPage() {
       isMounted = false;
     };
   }, [folderPath]);
+
+  const handleRefresh = async () => {
+    if (!folderPath) {
+      return;
+    }
+
+    setIsRefreshing(true);
+    setError('');
+
+    try {
+      const list = await window.secureDrive.listFolder(folderPath);
+      setEntries(toTreeNodes(list));
+    } catch {
+      setEntries([]);
+      setError('Could not read this folder. Please pick another one.');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -560,13 +580,23 @@ export default function FolderContentsPage() {
             <h1 className="mt-2 text-3xl font-bold md:text-4xl">Folder contents</h1>
             <p className="mt-2 max-w-3xl break-all text-sm text-slate-300">{folderPath || 'No folder selected'}</p>
           </div>
-          <button
-            type="button"
-            onClick={() => navigate('/')}
-            className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
-          >
-            Back to homepage
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="rounded-xl border border-emerald-300/40 bg-emerald-400/10 px-4 py-2 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-300/20 disabled:opacity-60"
+            >
+              {isRefreshing ? 'Refreshing...' : 'Refresh'}
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/')}
+              className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/10"
+            >
+              Back to homepage
+            </button>
+          </div>
         </header>
 
         <section className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg shadow-black/20 backdrop-blur">

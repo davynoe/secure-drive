@@ -117,6 +117,17 @@ type HomepageProps = {
   onLogout: () => void;
 };
 
+type ConfirmDialogState =
+  | {
+      kind: 'close-connection';
+      connection: SavedConnection;
+    }
+  | {
+      kind: 'remove-friend';
+      friendId: number;
+      friendName: string;
+    };
+
 export default function Homepage({ onLogout }: HomepageProps) {
   const navigate = useNavigate();
   const [user, setUser] = useState<StoredUser | null>(() => readStoredUser());
@@ -133,6 +144,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
   const [activeConnectionRequestId, setActiveConnectionRequestId] = useState<number | null>(null);
   const [closingConnectionId, setClosingConnectionId] = useState<number | null>(null);
   const [removingFriendId, setRemovingFriendId] = useState<number | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const collaboratorsPanelRef = useRef<HTMLDivElement | null>(null);
   const collaboratorSearchRef = useRef<HTMLInputElement | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
@@ -207,7 +219,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
     }
   };
 
-  const closeConnection = async (connection: SavedConnection) => {
+  const closeConnectionConfirmed = async (connection: SavedConnection) => {
     if (!user) return;
     if (connection.remoteConnectionId === null) {
       setSocialError('This connection has no remote id to close.');
@@ -238,6 +250,10 @@ export default function Homepage({ onLogout }: HomepageProps) {
     } finally {
       setClosingConnectionId(null);
     }
+  };
+
+  const requestCloseConnection = (connection: SavedConnection) => {
+    setConfirmDialog({ kind: 'close-connection', connection });
   };
 
   const getRemoteConnectionIdFromRequest = (request: ConnectionRequest): number | null => {
@@ -465,7 +481,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
     }
   };
 
-  const deleteFriend = async (friendId: number) => {
+  const deleteFriendConfirmed = async (friendId: number) => {
     if (!user) return;
 
     setRemovingFriendId(friendId);
@@ -490,6 +506,27 @@ export default function Homepage({ onLogout }: HomepageProps) {
       console.error('Failed to delete friend:', error);
     } finally {
       setRemovingFriendId(null);
+    }
+  };
+
+  const requestRemoveFriend = (friend: AppUser) => {
+    const friendName = friend.name ?? friend.handle ?? 'this friend';
+    setConfirmDialog({ kind: 'remove-friend', friendId: friend.id, friendName });
+  };
+
+  const handleConfirmAction = async () => {
+    if (!confirmDialog) return;
+
+    const current = confirmDialog;
+    setConfirmDialog(null);
+
+    if (current.kind === 'close-connection') {
+      await closeConnectionConfirmed(current.connection);
+      return;
+    }
+
+    if (current.kind === 'remove-friend') {
+      await deleteFriendConfirmed(current.friendId);
     }
   };
 
@@ -838,7 +875,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
                       </button>
                       <button
                         type="button"
-                        onClick={() => void closeConnection(connection)}
+                        onClick={() => requestCloseConnection(connection)}
                         disabled={closingConnectionId === connection.id}
                         className="rounded-lg border border-rose-300/50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-rose-200 transition hover:bg-rose-500/20 disabled:opacity-60"
                       >
@@ -1112,7 +1149,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
                         </div>
                         <button
                           type="button"
-                          onClick={() => void deleteFriend(friend.id)}
+                          onClick={() => requestRemoveFriend(friend)}
                           disabled={removingFriendId === friend.id}
                           className="rounded-lg border border-rose-300/50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-rose-200 transition hover:bg-rose-500/20 disabled:opacity-60"
                         >
@@ -1127,6 +1164,36 @@ export default function Homepage({ onLogout }: HomepageProps) {
           </div>
         </section>
       </div>
+        {confirmDialog ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 py-6">
+            <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-950/95 p-6 shadow-2xl shadow-black/40">
+              <h3 className="text-lg font-semibold text-white">
+                {confirmDialog.kind === 'close-connection' ? 'Close connection?' : 'Remove friend?'}
+              </h3>
+              <p className="mt-2 text-sm text-slate-300">
+                {confirmDialog.kind === 'close-connection'
+                  ? 'This will remove the connection and delete its synced data on this device.'
+                  : `Remove ${confirmDialog.friendName} from your collaborators?`}
+              </p>
+              <div className="mt-6 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setConfirmDialog(null)}
+                  className="rounded-lg border border-white/15 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-200 transition hover:bg-white/10"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleConfirmAction()}
+                  className="rounded-lg border border-rose-300/60 bg-rose-500/20 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-rose-100 transition hover:bg-rose-500/30"
+                >
+                  Confirm
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
     </main>
   );
 }
