@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 const SELECTED_FOLDER_KEY = 'secure-drive-selected-folder';
@@ -67,10 +67,10 @@ function createMockLastUpdated(input: string): string {
     hash = (hash * 31 + input.charCodeAt(i)) >>> 0;
   }
 
-  const now = Date.now();
+  const baseTime = Date.UTC(2026, 0, 1);
   const maxRangeMs = 1000 * 60 * 60 * 24 * 14;
   const offsetMs = hash % maxRangeMs;
-  const date = new Date(now - offsetMs);
+  const date = new Date(baseTime - offsetMs);
 
   return date.toLocaleString();
 }
@@ -103,6 +103,17 @@ function WarningIcon() {
       <path
         fill="currentColor"
         d="M12 2.25c.45 0 .87.24 1.1.63l8.4 14.1c.23.39.23.87 0 1.26-.23.39-.65.63-1.1.63H3.6c-.45 0-.87-.24-1.1-.63-.23-.39-.23-.87 0-1.26l8.4-14.1c.23-.39.65-.63 1.1-.63Zm0 5.25a.75.75 0 0 0-.75.75v5.5a.75.75 0 0 0 1.5 0v-5.5A.75.75 0 0 0 12 7.5Zm0 9.25a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z"
+      />
+    </svg>
+  );
+}
+
+function SafeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 text-emerald-300">
+      <path
+        fill="currentColor"
+        d="M12 2.25a9.75 9.75 0 1 0 9.75 9.75A9.76 9.76 0 0 0 12 2.25Zm4.28 7.53-4.75 6a.75.75 0 0 1-1.13.05l-2.68-2.78a.75.75 0 1 1 1.08-1.04l2.06 2.15 4.18-5.27a.75.75 0 1 1 1.24.89Z"
       />
     </svg>
   );
@@ -212,6 +223,54 @@ function findNodeByPath(nodes: FolderTreeNode[], targetPath: string): FolderTree
   return null;
 }
 
+async function fetchSecurityPaths(folderPath: string): Promise<{ virusPaths: Set<string>; safePaths: Set<string> }> {
+  const emptyResult = { virusPaths: new Set<string>(), safePaths: new Set<string>() };
+
+  if (!folderPath) {
+    return emptyResult;
+  }
+
+  const user = readStoredUser();
+  if (!user) {
+    return emptyResult;
+  }
+
+  const connections = await window.secureDrive.listSyncConnections(user.id);
+  const normalizedFolderPath = normalizePath(folderPath).replace(/\/+$/, '');
+  const connection = connections
+    .map((item) => ({
+      item,
+      normalized: normalizePath(item.folderPath).replace(/\/+$/, ''),
+    }))
+    .filter(({ normalized }) => normalizedFolderPath === normalized || normalizedFolderPath.startsWith(`${normalized}/`))
+    .sort((a, b) => b.normalized.length - a.normalized.length)[0]?.item;
+
+  if (!connection) {
+    return emptyResult;
+  }
+
+  const files = await window.secureDrive.listFileMetadata(connection.id);
+  const connectionBase = normalizePath(connection.folderPath).replace(/\/+$/, '');
+
+  const virusPaths = new Set(
+    files
+      .filter((file) => file.isVirus && !file.deleted)
+      .map((file) => joinPaths(connectionBase, file.relativePath))
+      .filter((fullPath) => normalizedFolderPath === fullPath || fullPath.startsWith(`${normalizedFolderPath}/`))
+      .map((fullPath) => getRelativePath(fullPath, normalizedFolderPath)),
+  );
+
+  const safePaths = new Set(
+    files
+      .filter((file) => !file.isVirus && !file.deleted && file.filename.toLowerCase().endsWith('.exe'))
+      .map((file) => joinPaths(connectionBase, file.relativePath))
+      .filter((fullPath) => normalizedFolderPath === fullPath || fullPath.startsWith(`${normalizedFolderPath}/`))
+      .map((fullPath) => getRelativePath(fullPath, normalizedFolderPath)),
+  );
+
+  return { virusPaths, safePaths };
+}
+
 export default function FolderContentsPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -223,6 +282,7 @@ export default function FolderContentsPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [virusPaths, setVirusPaths] = useState<Set<string>>(() => new Set());
+  const [safePaths, setSafePaths] = useState<Set<string>>(() => new Set());
   const [scanningPaths, setScanningPaths] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
@@ -254,6 +314,8 @@ export default function FolderContentsPage() {
         setEntries([]);
         setLoading(false);
         setError('No folder selected yet.');
+        setVirusPaths(new Set());
+        setSafePaths(new Set());
         return;
       }
 
@@ -293,6 +355,9 @@ export default function FolderContentsPage() {
     try {
       const list = await window.secureDrive.listFolder(folderPath);
       setEntries(toTreeNodes(list));
+      const result = await fetchSecurityPaths(folderPath);
+      setVirusPaths(result.virusPaths);
+      setSafePaths(result.safePaths);
     } catch {
       setEntries([]);
       setError('Could not read this folder. Please pick another one.');
@@ -345,57 +410,20 @@ export default function FolderContentsPage() {
   useEffect(() => {
     let isMounted = true;
 
-    const loadVirusFlags = async () => {
-      if (!folderPath) {
-        setVirusPaths(new Set());
-        return;
-      }
-
-      const user = readStoredUser();
-      if (!user) {
-        setVirusPaths(new Set());
-        return;
-      }
-
+    void (async () => {
       try {
-        const connections = await window.secureDrive.listSyncConnections(user.id);
-        const normalizedFolderPath = normalizePath(folderPath).replace(/\/+$/, '');
-        const connection = connections
-          .map((item) => ({
-            item,
-            normalized: normalizePath(item.folderPath).replace(/\/+$/, ''),
-          }))
-          .filter(({ normalized }) =>
-            normalizedFolderPath === normalized || normalizedFolderPath.startsWith(`${normalized}/`)
-          )
-          .sort((a, b) => b.normalized.length - a.normalized.length)[0]?.item;
-        if (!connection) {
-          setVirusPaths(new Set());
-          return;
-        }
-
-        const files = await window.secureDrive.listFileMetadata(connection.id);
+        const result = await fetchSecurityPaths(folderPath);
         if (!isMounted) return;
 
-        const connectionBase = normalizePath(connection.folderPath).replace(/\/+$/, '');
-        const flagged = new Set(
-          files
-            .filter((file) => file.isVirus && !file.deleted)
-            .map((file) => joinPaths(connectionBase, file.relativePath))
-            .filter((fullPath) =>
-              normalizedFolderPath === fullPath || fullPath.startsWith(`${normalizedFolderPath}/`)
-            )
-            .map((fullPath) => getRelativePath(fullPath, normalizedFolderPath)),
-        );
-        setVirusPaths(flagged);
+        setVirusPaths(result.virusPaths);
+        setSafePaths(result.safePaths);
       } catch {
         if (isMounted) {
           setVirusPaths(new Set());
+          setSafePaths(new Set());
         }
       }
-    };
-
-    void loadVirusFlags();
+    })();
 
     return () => {
       isMounted = false;
@@ -483,6 +511,7 @@ export default function FolderContentsPage() {
     return nodes.flatMap((node) => {
       const relativePath = node.kind === 'file' ? getRelativePath(node.path, folderPath) : '';
       const isVirus = node.kind === 'file' && virusPaths.has(relativePath);
+      const isSafe = node.kind === 'file' && safePaths.has(relativePath);
       const normalizedNodePath = normalizePath(node.path);
       const isExecutable = node.kind === 'file' && node.name.toLowerCase().endsWith('.exe');
       const isScanning = isExecutable && scanningPaths.has(normalizedNodePath);
@@ -514,6 +543,10 @@ export default function FolderContentsPage() {
                 ) : isVirus ? (
                   <span className="flex items-center text-rose-300" title="Virus detected" aria-label="Virus detected">
                     <WarningIcon />
+                  </span>
+                ) : isExecutable && isSafe ? (
+                  <span className="flex items-center text-emerald-300" title="Safe" aria-label="Safe">
+                    <SafeIcon />
                   </span>
                 ) : null}
                 <span className="truncate">{node.name}</span>

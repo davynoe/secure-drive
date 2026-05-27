@@ -5,7 +5,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { pullRemoteChanges, syncConnectionToBackend } from './backendSync';
-import { getSyncConnectionById, syncFileMetadataSnapshot, type FileMetadataInput, type SyncConnection } from './syncStore';
+import { getSyncConnectionById, listFileMetadata, syncFileMetadataSnapshot, type FileMetadataInput, type SyncConnection } from './syncStore';
 
 const execFileAsync = promisify(execFile);
 const malwareScannerName = process.platform === 'win32' ? 'malware_scanner.exe' : 'malware_scanner';
@@ -31,8 +31,9 @@ type ConnectionWatchState = {
 const connectionWatchStates = new Map<number, ConnectionWatchState>();
 const CONNECTION_POLL_INTERVAL_MS = 3000;
 
-async function collectDirectorySnapshot(folderPath: string): Promise<FileMetadataInput[]> {
+async function collectDirectorySnapshot(folderPath: string, existingFiles: ReturnType<typeof listFileMetadata>): Promise<FileMetadataInput[]> {
   const results: FileMetadataInput[] = [];
+  const existingByPath = new Map(existingFiles.map((file) => [file.relativePath, file] as const));
 
   async function scanForVirus(fullPath: string, isExecutable: boolean): Promise<boolean> {
     if (!isExecutable) {
@@ -77,24 +78,36 @@ async function collectDirectorySnapshot(folderPath: string): Promise<FileMetadat
 
       const isDirectory = entry.isDirectory();
       const shouldScan = !isDirectory && path.extname(entry.name).toLowerCase() === '.exe';
+      const existing = existingByPath.get(relativePath);
+      const lastModified = Math.floor(stats.mtimeMs);
       const normalizedPath = normalizeScanPath(fullPath);
       const cached = scanCache.get(normalizedPath);
+      const shouldSkipScan = Boolean(
+        shouldScan &&
+        existing?.skipScan &&
+        existing.lastModified === lastModified &&
+        existing.size === stats.size,
+      );
+
       const isVirus = shouldScan
-        ? cached && cached.lastModified === Math.floor(stats.mtimeMs)
-          ? cached.isVirus
-          : await scanForVirus(fullPath, true)
+        ? shouldSkipScan
+          ? existing?.isVirus ?? false
+          : cached && cached.lastModified === lastModified
+            ? cached.isVirus
+            : await scanForVirus(fullPath, true)
         : false;
 
       if (shouldScan) {
-        scanCache.set(normalizedPath, { lastModified: Math.floor(stats.mtimeMs), isVirus });
+        scanCache.set(normalizedPath, { lastModified, isVirus });
       }
       results.push({
         filename: entry.name,
         relativePath,
         size: isDirectory ? null : stats.size,
-        lastModified: Math.floor(stats.mtimeMs),
+        lastModified,
         isDirectory,
         isVirus,
+        skipScan: shouldSkipScan,
         deleted: false,
       });
 
@@ -235,7 +248,8 @@ async function refreshConnection(connection: SyncConnection): Promise<void> {
   state.pendingRefresh = false;
 
   try {
-    const snapshot = await collectDirectorySnapshot(connection.folderPath);
+    const existingFiles = listFileMetadata(connection.id);
+    const snapshot = await collectDirectorySnapshot(connection.folderPath, existingFiles);
     syncFileMetadataSnapshot(connection.id, snapshot);
   } catch {
     syncFileMetadataSnapshot(connection.id, []);

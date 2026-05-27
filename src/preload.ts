@@ -40,6 +40,7 @@ type FileMetadata = {
 	contentHash: string | null;
 	isDirectory: boolean;
 	isVirus: boolean;
+	skipScan: boolean;
 	deleted: boolean;
 	createdAt: string;
 	updatedAt: string;
@@ -53,6 +54,7 @@ type FileMetadataInput = {
 	contentHash?: string | null;
 	isDirectory?: boolean;
 	isVirus?: boolean;
+	skipScan?: boolean;
 	deleted?: boolean;
 };
 

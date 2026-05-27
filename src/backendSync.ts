@@ -129,6 +129,15 @@ function isRemoteDeleted(file: RemoteFileMetadata): boolean {
 	return value === true || value === 1;
 }
 
+function getRemoteLastModified(file: RemoteFileMetadata): number {
+	const value = file.lastModified ?? file.last_modified;
+	return typeof value === 'number' ? value : Date.now();
+}
+
+function isExecutablePath(relativePath: string): boolean {
+	return relativePath.toLowerCase().endsWith('.exe');
+}
+
 function mapRemoteMetadataToLocalInput(file: RemoteFileMetadata): FileMetadataInput | null {
 	const relativePath = resolveRemotePath(file);
 	if (!relativePath) {
@@ -143,9 +152,10 @@ function mapRemoteMetadataToLocalInput(file: RemoteFileMetadata): FileMetadataIn
 		filename,
 		relativePath,
 		size: typeof file.size === 'number' || file.size === null ? file.size : null,
-		lastModified: typeof (file.lastModified ?? file.last_modified) === 'number' ? (file.lastModified ?? file.last_modified) as number : Date.now(),
+		lastModified: getRemoteLastModified(file),
 		contentHash: (file.contentHash ?? file.content_hash) ?? null,
 		isDirectory,
+		skipScan: !isDirectory && !isRemoteDeleted(file) && isExecutablePath(relativePath),
 		deleted: isRemoteDeleted(file),
 	};
 }
@@ -235,6 +245,10 @@ async function pushLocalSnapshot(connection: SyncConnection, apiBaseUrl: string)
 			continue;
 		}
 
+		if (file.skipScan && !file.deleted) {
+			continue;
+		}
+
 		if (file.deleted) {
 			await postJson(`${apiBaseUrl}/sync/${connection.remoteConnectionId}/file`, {
 				actorUserId: connection.ownerUserId,
@@ -304,7 +318,7 @@ async function getRemoteFiles(connection: SyncConnection, apiBaseUrl: string): P
 	return data.files;
 }
 
-async function downloadRemoteFile(connection: SyncConnection, apiBaseUrl: string, relativePath: string, destinationPath: string): Promise<void> {
+async function downloadRemoteFile(connection: SyncConnection, apiBaseUrl: string, relativePath: string, destinationPath: string, lastModified: number): Promise<void> {
 	const fileResponse = await fetch(
 		`${apiBaseUrl}/sync/${connection.remoteConnectionId}/file?userId=${encodeURIComponent(String(connection.ownerUserId))}&path=${encodeURIComponent(relativePath)}`,
 	);
@@ -335,6 +349,11 @@ async function downloadRemoteFile(connection: SyncConnection, apiBaseUrl: string
 	} finally {
 		writer.end();
 		await once(writer, 'finish');
+	}
+
+	if (Number.isFinite(lastModified)) {
+		const timestamp = new Date(lastModified);
+		await fs.utimes(destinationPath, timestamp, timestamp);
 	}
 }
 
@@ -396,7 +415,7 @@ async function applyRemoteChangesToLocal(
 				continue;
 			}
 
-			await downloadRemoteFile(connection, apiBaseUrl, relativePath, localPath);
+			await downloadRemoteFile(connection, apiBaseUrl, relativePath, localPath, getRemoteLastModified(remoteFile));
 		}
 	}, { schedulePendingRefresh: false });
 }
@@ -438,6 +457,7 @@ export async function pullRemoteChanges(connection: SyncConnection, apiBaseUrl?:
 					contentHash: file.contentHash ?? null,
 					isDirectory: file.isDirectory,
 					isVirus: file.isVirus,
+					skipScan: file.skipScan,
 					deleted: file.deleted,
 				}));
 

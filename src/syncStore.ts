@@ -39,6 +39,7 @@ export type FileMetadata = {
   contentHash: string | null;
   isDirectory: boolean;
   isVirus: boolean;
+  skipScan: boolean;
   deleted: boolean;
   createdAt: string;
   updatedAt: string;
@@ -52,6 +53,7 @@ export type FileMetadataInput = {
   contentHash?: string | null;
   isDirectory?: boolean;
   isVirus?: boolean;
+  skipScan?: boolean;
   deleted?: boolean;
 };
 
@@ -98,6 +100,7 @@ function createDatabaseConnection() {
       content_hash TEXT,
       is_directory INTEGER NOT NULL DEFAULT 0,
       is_virus INTEGER NOT NULL DEFAULT 0,
+      skip_scan INTEGER NOT NULL DEFAULT 0,
       deleted INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -113,8 +116,18 @@ function createDatabaseConnection() {
   `);
 
   migrateSyncConnectionsSchema(db);
+  migrateFileMetadataSchema(db);
 
   return db;
+}
+
+function migrateFileMetadataSchema(db: any) {
+  const columns = db.prepare('PRAGMA table_info(file_metadata)').all() as Array<{ name: string }>;
+  if (columns.some((column) => column.name === 'skip_scan')) {
+    return;
+  }
+
+  db.exec('ALTER TABLE file_metadata ADD COLUMN skip_scan INTEGER NOT NULL DEFAULT 0;');
 }
 
 function migrateSyncConnectionsSchema(db: any) {
@@ -233,6 +246,7 @@ function mapFileMetadata(row: {
   content_hash: string | null;
   is_directory: number;
   is_virus: number;
+  skip_scan: number;
   deleted: number;
   created_at: string;
   updated_at: string;
@@ -247,6 +261,7 @@ function mapFileMetadata(row: {
     contentHash: row.content_hash,
     isDirectory: row.is_directory === 1,
     isVirus: row.is_virus === 1,
+    skipScan: row.skip_scan === 1,
     deleted: row.deleted === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -413,9 +428,10 @@ export function upsertFileMetadata(connectionId: number, input: FileMetadataInpu
       content_hash,
       is_directory,
       is_virus,
+      skip_scan,
       deleted
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(connection_id, relative_path) DO UPDATE SET
       filename = excluded.filename,
       size = excluded.size,
@@ -423,6 +439,7 @@ export function upsertFileMetadata(connectionId: number, input: FileMetadataInpu
       content_hash = excluded.content_hash,
       is_directory = excluded.is_directory,
       is_virus = excluded.is_virus,
+      skip_scan = excluded.skip_scan,
       deleted = excluded.deleted,
       updated_at = CURRENT_TIMESTAMP
     WHERE NOT (
@@ -432,6 +449,7 @@ export function upsertFileMetadata(connectionId: number, input: FileMetadataInpu
       AND (content_hash = excluded.content_hash OR (content_hash IS NULL AND excluded.content_hash IS NULL))
       AND is_directory = excluded.is_directory
       AND is_virus = excluded.is_virus
+      AND skip_scan = excluded.skip_scan
       AND deleted = excluded.deleted
     )
   `);
@@ -445,6 +463,7 @@ export function upsertFileMetadata(connectionId: number, input: FileMetadataInpu
     input.contentHash ?? null,
     input.isDirectory ? 1 : 0,
     input.isVirus ? 1 : 0,
+    input.skipScan ? 1 : 0,
     input.deleted ? 1 : 0,
   );
 
@@ -454,7 +473,7 @@ export function upsertFileMetadata(connectionId: number, input: FileMetadataInpu
 export function getFileMetadata(connectionId: number, relativePath: string): FileMetadata | null {
   const db = getDatabase();
   const stmt = db.prepare(
-    `SELECT id, connection_id, filename, relative_path, size, last_modified, content_hash, is_directory, is_virus, deleted, created_at, updated_at
+    `SELECT id, connection_id, filename, relative_path, size, last_modified, content_hash, is_directory, is_virus, skip_scan, deleted, created_at, updated_at
      FROM file_metadata
      WHERE connection_id = ? AND relative_path = ?`
   );
@@ -469,6 +488,7 @@ export function getFileMetadata(connectionId: number, relativePath: string): Fil
         content_hash: string | null;
         is_directory: number;
         is_virus: number;
+        skip_scan: number;
         deleted: number;
         created_at: string;
         updated_at: string;
@@ -481,7 +501,7 @@ export function getFileMetadata(connectionId: number, relativePath: string): Fil
 export function listFileMetadata(connectionId: number): FileMetadata[] {
   const db = getDatabase();
   const stmt = db.prepare(
-    `SELECT id, connection_id, filename, relative_path, size, last_modified, content_hash, is_directory, is_virus, deleted, created_at, updated_at
+    `SELECT id, connection_id, filename, relative_path, size, last_modified, content_hash, is_directory, is_virus, skip_scan, deleted, created_at, updated_at
      FROM file_metadata
      WHERE connection_id = ?
      ORDER BY relative_path ASC`
@@ -496,6 +516,7 @@ export function listFileMetadata(connectionId: number): FileMetadata[] {
     content_hash: string | null;
     is_directory: number;
     is_virus: number;
+    skip_scan: number;
     deleted: number;
     created_at: string;
     updated_at: string;
@@ -517,9 +538,10 @@ export function replaceFileMetadataForConnection(connectionId: number, files: Fi
       content_hash,
       is_directory,
       is_virus,
+      skip_scan,
       deleted
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const tx = db.transaction((entries: FileMetadataInput[]) => {
@@ -535,6 +557,7 @@ export function replaceFileMetadataForConnection(connectionId: number, files: Fi
         entry.contentHash ?? null,
         entry.isDirectory ? 1 : 0,
         entry.isVirus ? 1 : 0,
+        entry.skipScan ? 1 : 0,
         entry.deleted ? 1 : 0,
       );
     }
@@ -560,9 +583,10 @@ export function syncFileMetadataSnapshot(connectionId: number, files: FileMetada
       content_hash,
       is_directory,
       is_virus,
+      skip_scan,
       deleted
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(connection_id, relative_path) DO UPDATE SET
       filename = excluded.filename,
       size = excluded.size,
@@ -570,6 +594,7 @@ export function syncFileMetadataSnapshot(connectionId: number, files: FileMetada
       content_hash = excluded.content_hash,
       is_directory = excluded.is_directory,
       is_virus = excluded.is_virus,
+      skip_scan = excluded.skip_scan,
       deleted = excluded.deleted,
       updated_at = CURRENT_TIMESTAMP
     WHERE NOT (
@@ -579,6 +604,7 @@ export function syncFileMetadataSnapshot(connectionId: number, files: FileMetada
       AND (content_hash = excluded.content_hash OR (content_hash IS NULL AND excluded.content_hash IS NULL))
       AND is_directory = excluded.is_directory
       AND is_virus = excluded.is_virus
+      AND skip_scan = excluded.skip_scan
       AND deleted = excluded.deleted
     )
   `);
@@ -602,6 +628,7 @@ export function syncFileMetadataSnapshot(connectionId: number, files: FileMetada
         entry.contentHash ?? null,
         entry.isDirectory ? 1 : 0,
         entry.isVirus ? 1 : 0,
+        entry.skipScan ? 1 : 0,
         entry.deleted ? 1 : 0,
       );
       markPresentStmt.run(connectionId, entry.relativePath);
