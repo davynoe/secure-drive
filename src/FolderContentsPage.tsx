@@ -254,7 +254,7 @@ async function fetchSecurityPaths(folderPath: string): Promise<{ virusPaths: Set
 
   const virusPaths = new Set(
     files
-      .filter((file) => file.isVirus && !file.deleted)
+      .filter((file) => file.isVirus === 1 && !file.deleted)
       .map((file) => joinPaths(connectionBase, file.relativePath))
       .filter((fullPath) => normalizedFolderPath === fullPath || fullPath.startsWith(`${normalizedFolderPath}/`))
       .map((fullPath) => getRelativePath(fullPath, normalizedFolderPath)),
@@ -262,7 +262,7 @@ async function fetchSecurityPaths(folderPath: string): Promise<{ virusPaths: Set
 
   const safePaths = new Set(
     files
-      .filter((file) => !file.isVirus && !file.deleted && file.filename.toLowerCase().endsWith('.exe'))
+      .filter((file) => file.isVirus === 0 && !file.deleted && file.filename.toLowerCase().endsWith('.exe'))
       .map((file) => joinPaths(connectionBase, file.relativePath))
       .filter((fullPath) => normalizedFolderPath === fullPath || fullPath.startsWith(`${normalizedFolderPath}/`))
       .map((fullPath) => getRelativePath(fullPath, normalizedFolderPath)),

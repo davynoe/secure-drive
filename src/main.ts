@@ -152,7 +152,7 @@ type FileMetadataInput = {
   lastModified: number;
   contentHash?: string | null;
   isDirectory?: boolean;
-  isVirus?: boolean;
+  isVirus?: number | null;
   skipScan?: boolean;
   deleted?: boolean;
 };
@@ -283,7 +283,7 @@ ipcMain.handle('secure-drive:upsert-file-metadata', async (_event, connectionId:
     lastModified: input.lastModified,
     contentHash: typeof input.contentHash === 'string' ? input.contentHash : null,
     isDirectory: Boolean(input.isDirectory),
-    isVirus: Boolean(input.isVirus),
+    isVirus: typeof input.isVirus === 'number' ? input.isVirus : null,
     skipScan: Boolean(input.skipScan),
     deleted: Boolean(input.deleted),
   });
@@ -303,7 +303,7 @@ ipcMain.handle('secure-drive:replace-file-metadata', async (_event, connectionId
       lastModified: file.lastModified,
       contentHash: typeof file.contentHash === 'string' ? file.contentHash : null,
       isDirectory: Boolean(file.isDirectory),
-      isVirus: Boolean(file.isVirus),
+      isVirus: typeof file.isVirus === 'number' ? file.isVirus : null,
       skipScan: Boolean(file.skipScan),
       deleted: Boolean(file.deleted),
     })),

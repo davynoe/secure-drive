@@ -11,7 +11,7 @@ const execFileAsync = promisify(execFile);
 const malwareScannerName = process.platform === 'win32' ? 'malware_scanner.exe' : 'malware_scanner';
 const malwareScannerPath = path.join(app.getAppPath(), malwareScannerName);
 const scanningPaths = new Set<string>();
-const scanCache = new Map<string, { lastModified: number; isVirus: boolean }>();
+const scanCache = new Map<string, { lastModified: number; isVirus: number }>();
 
 function normalizeScanPath(value: string): string {
   return value.replace(/\\/g, '/');
@@ -35,25 +35,25 @@ async function collectDirectorySnapshot(folderPath: string, existingFiles: Retur
   const results: FileMetadataInput[] = [];
   const existingByPath = new Map(existingFiles.map((file) => [file.relativePath, file] as const));
 
-  async function scanForVirus(fullPath: string, isExecutable: boolean): Promise<boolean> {
+  async function scanForVirus(fullPath: string, isExecutable: boolean): Promise<number> {
     if (!isExecutable) {
-      return false;
+      return 0;
     }
 
     const normalizedPath = normalizeScanPath(fullPath);
     scanningPaths.add(normalizedPath);
-    let isVirus = false;
+    let isVirus = 0;
 
     try {
       const result = await execFileAsync(malwareScannerPath, [fullPath, '--raw']);
       // Parse stdout output - scanner outputs "0" or "1"
       const output = result.stdout?.toString().trim() ?? '0';
-      isVirus = output === '1';
+      isVirus = output === '1' ? 1 : 0;
     } catch (error: any) {
       // Check stdout even on error
       if (error?.stdout) {
         const output = error.stdout.toString().trim();
-        isVirus = output === '1';
+        isVirus = output === '1' ? 1 : 0;
       }
     } finally {
       scanningPaths.delete(normalizedPath);
@@ -85,19 +85,20 @@ async function collectDirectorySnapshot(folderPath: string, existingFiles: Retur
       const shouldSkipScan = Boolean(
         shouldScan &&
         existing?.skipScan &&
+        existing.isVirus !== null &&
         existing.lastModified === lastModified &&
         existing.size === stats.size,
       );
 
       const isVirus = shouldScan
         ? shouldSkipScan
-          ? existing?.isVirus ?? false
+          ? existing?.isVirus ?? null
           : cached && cached.lastModified === lastModified
             ? cached.isVirus
             : await scanForVirus(fullPath, true)
-        : false;
+        : null;
 
-      if (shouldScan) {
+      if (shouldScan && isVirus !== null) {
         scanCache.set(normalizedPath, { lastModified, isVirus });
       }
       results.push({

@@ -155,6 +155,7 @@ function mapRemoteMetadataToLocalInput(file: RemoteFileMetadata): FileMetadataIn
 		lastModified: getRemoteLastModified(file),
 		contentHash: (file.contentHash ?? file.content_hash) ?? null,
 		isDirectory,
+		isVirus: !isDirectory && !isRemoteDeleted(file) && isExecutablePath(relativePath) ? 0 : null,
 		skipScan: !isDirectory && !isRemoteDeleted(file) && isExecutablePath(relativePath),
 		deleted: isRemoteDeleted(file),
 	};
@@ -241,7 +242,7 @@ async function pushLocalSnapshot(connection: SyncConnection, apiBaseUrl: string)
 	const files = listFileMetadata(connection.id);
 
 	for (const file of files) {
-		if (file.isVirus) {
+		if (file.isVirus === 1) {
 			continue;
 		}
 
@@ -448,7 +449,7 @@ export async function pullRemoteChanges(connection: SyncConnection, apiBaseUrl?:
 
 			const remotePaths = new Set(metadataInputs.map((file) => file.relativePath));
 			const preservedVirusEntries = listFileMetadata(connection.id)
-				.filter((file) => file.isVirus && !remotePaths.has(file.relativePath))
+				.filter((file) => file.isVirus === 1 && !remotePaths.has(file.relativePath))
 				.map((file) => ({
 					filename: file.filename,
 					relativePath: file.relativePath,
