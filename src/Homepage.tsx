@@ -333,7 +333,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
         setConnectionRequests([]);
       }
     } catch (error) {
-      setSocialError('Failed to load friends data. Please try again.');
+      setSocialError('Failed to load collaborators data. Please try again.');
       console.error('Failed to load social data:', error);
     } finally {
       setSocialLoading(false);
@@ -834,15 +834,19 @@ export default function Homepage({ onLogout }: HomepageProps) {
       <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-10 md:px-10 md:py-14">
         <header className="mb-10">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-emerald-300/90">
-              Secure Drive
-            </p>
-            <h1 className="mt-2 text-3xl font-bold md:text-4xl">Homepage</h1>
-            <p className="mt-2 text-sm text-slate-300">Welcome, {user?.name || user?.handle || 'Guest'}</p>
+            <h1 className="text-3xl font-bold md:text-4xl">Secure Drive</h1>
+            <p className="mt-2 text-sm text-slate-300">Welcome Eren Tanyaş</p>
           </div>
         </header>
 
-        <div className="mb-5 flex justify-end">
+        <div className="mb-6 flex flex-wrap items-center justify-end gap-3">
+          <button
+            type="button"
+            onClick={handlePickFolder}
+            className="rounded-xl bg-emerald-400 px-5 py-2 text-sm font-semibold text-emerald-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-300"
+          >
+            New secure folder
+          </button>
           <button
             type="button"
             onClick={onLogout}
@@ -852,8 +856,8 @@ export default function Homepage({ onLogout }: HomepageProps) {
           </button>
         </div>
 
-        <section className="mt-2 grid gap-5 lg:grid-cols-3">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6 lg:col-span-2">
+        <section className="mt-2">
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
             <h2 className="text-lg font-semibold text-white">Active sync folders</h2>
             {connections.length === 0 ? (
               <p className="mt-4 text-sm text-slate-300">No secure folder connections yet.</p>
@@ -887,36 +891,6 @@ export default function Homepage({ onLogout }: HomepageProps) {
               </ul>
             )}
           </div>
-
-          <aside className="rounded-2xl border border-white/10 bg-white/5 p-6">
-            <h2 className="text-lg font-semibold text-white">Quick actions</h2>
-            <div className="mt-4 grid gap-3">
-              <button
-                type="button"
-                onClick={handlePickFolder}
-                className="rounded-xl bg-emerald-400 px-4 py-2 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-300"
-              >
-                New secure folder
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  collaboratorsPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                  collaboratorSearchRef.current?.focus();
-                }}
-                className="rounded-xl border border-slate-500/40 bg-slate-900/60 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-slate-800"
-              >
-                Add collaborator
-              </button>
-              <button
-                type="button"
-                onClick={() => collaboratorsPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                className="rounded-xl border border-slate-500/40 bg-slate-900/60 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-slate-800"
-              >
-                Collaborators
-              </button>
-            </div>
-          </aside>
         </section>
 
         <section className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-6">
@@ -1003,7 +977,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-white">Collaborators</h2>
             <span className="text-xs uppercase tracking-[0.14em] text-slate-300">
-              Friends: {friends.length} | Pending: {pendingRequests.length}
+              Collaborators: {friends.length} | Pending: {pendingRequests.length}
             </span>
           </div>
 
@@ -1131,9 +1105,9 @@ export default function Homepage({ onLogout }: HomepageProps) {
               </div>
 
               <div>
-                <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-300">Friends</h3>
+                <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-300">Collaborators</h3>
                 {socialLoading ? (
-                  <p className="mt-3 text-sm text-slate-400">Loading friends...</p>
+                  <p className="mt-3 text-sm text-slate-400">Loading collaborators...</p>
                 ) : friends.length === 0 ? (
                   <p className="mt-3 text-sm text-slate-400">No collaborators connected yet.</p>
                 ) : (
@@ -1168,7 +1142,7 @@ export default function Homepage({ onLogout }: HomepageProps) {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 py-6">
             <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-950/95 p-6 shadow-2xl shadow-black/40">
               <h3 className="text-lg font-semibold text-white">
-                {confirmDialog.kind === 'close-connection' ? 'Close connection?' : 'Remove friend?'}
+                {confirmDialog.kind === 'close-connection' ? 'Close connection?' : 'Remove collaborator?'}
               </h3>
               <p className="mt-2 text-sm text-slate-300">
                 {confirmDialog.kind === 'close-connection'

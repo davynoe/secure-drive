@@ -106,15 +106,15 @@ export default function CollaboratorPromptPage() {
       try {
         const response = await fetch(`${API_URL}/friends/${currentUser.id}`);
         if (!response.ok) {
-          throw new Error('Failed to load friends.');
+          throw new Error('Failed to load collaborators.');
         }
 
         const data = (await response.json()) as AppUser[];
         setFriends(Array.isArray(data) ? data : []);
       } catch (loadError) {
         setFriends([]);
-        setError('Could not load friends right now.');
-        console.error('Failed to load friends:', loadError);
+        setError('Could not load collaborators right now.');
+        console.error('Failed to load collaborators:', loadError);
       } finally {
         setLoading(false);
       }
@@ -290,7 +290,7 @@ export default function CollaboratorPromptPage() {
             </fieldset>
 
             <div className="flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold text-white">Your friends</h2>
+              <h2 className="text-lg font-semibold text-white">Your collaborators</h2>
               {loading && <span className="text-xs uppercase tracking-[0.14em] text-slate-300">Loading...</span>}
             </div>
 
