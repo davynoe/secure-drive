@@ -835,7 +835,9 @@ export default function Homepage({ onLogout }: HomepageProps) {
         <header className="mb-10">
           <div>
             <h1 className="text-3xl font-bold md:text-4xl">Secure Drive</h1>
-            <p className="mt-2 text-sm text-slate-300">Welcome Eren Tanyaş</p>
+            <p className="mt-2 text-sm text-slate-300">
+              Welcome {user?.name ?? 'there'}
+            </p>
           </div>
         </header>
 
